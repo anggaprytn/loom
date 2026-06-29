@@ -133,11 +133,12 @@ function renderDashboard() {
       const $ = (id) => document.getElementById(id);
       const state = { users: [], providers: [], aliases: [], keys: [] };
       $('adminToken').value = localStorage.getItem('tlg_admin_token') || '';
-      $('saveToken').onclick = () => { localStorage.setItem('tlg_admin_token', $('adminToken').value); log('Token saved locally in this browser.'); };
+      $('saveToken').onclick = () => { persistToken(); log('Token saved locally in this browser.'); };
       $('refresh').onclick = refresh;
 
       async function api(path, options = {}) {
         const token = $('adminToken').value || localStorage.getItem('tlg_admin_token');
+        if (token) localStorage.setItem('tlg_admin_token', token);
         const res = await fetch('/admin' + path, {
           ...options,
           headers: {
@@ -152,23 +153,38 @@ function renderDashboard() {
         return body;
       }
 
+      function persistToken() {
+        if ($('adminToken').value) localStorage.setItem('tlg_admin_token', $('adminToken').value);
+      }
       function log(value) { $('activity').textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2); }
       function esc(value) {
         return String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
       }
 
       async function refresh() {
-        try {
-          const [users, providers, aliases, keys, usage] = await Promise.all([
-            api('/users'), api('/providers'), api('/model-aliases'), api('/keys'), api('/usage')
-          ]);
-          Object.assign(state, { users, providers, aliases, keys });
+        persistToken();
+        const results = await Promise.allSettled([
+          api('/users'), api('/providers'), api('/model-aliases'), api('/keys'), api('/usage')
+        ]);
+        const [users, providers, aliases, keys, usage] = results;
+
+        if (users.status === 'fulfilled') state.users = users.value;
+        if (providers.status === 'fulfilled') state.providers = providers.value;
+        if (aliases.status === 'fulfilled') state.aliases = aliases.value;
+        if (keys.status === 'fulfilled') state.keys = keys.value;
+
+        if ([users, providers, aliases, keys].some((result) => result.status === 'fulfilled')) {
           renderSelects();
           renderProviders();
           renderAliases();
-          $('usage').textContent = JSON.stringify(usage.totals || usage, null, 2);
-          log('Refreshed.');
-        } catch (error) { log(error.message); }
+        }
+
+        if (usage.status === 'fulfilled') {
+          $('usage').textContent = JSON.stringify(usage.value.totals || usage.value, null, 2);
+        }
+
+        const failures = results.filter((result) => result.status === 'rejected');
+        log(failures.length ? failures.map((failure) => failure.reason.message).join('\\n') : 'Refreshed.');
       }
 
       function renderSelects() {
@@ -215,6 +231,7 @@ function renderDashboard() {
       window.deleteProvider = async (id) => { if (confirm('Disable provider and aliases?')) { try { log(await api('/providers/' + id, { method: 'DELETE' })); await refresh(); } catch (e) { log(e.message); } } };
       window.syncAlias = async (id) => { try { log(await api('/model-aliases/' + id + '/sync', { method: 'POST' })); } catch (e) { log(e.message); } };
       window.deleteAlias = async (id) => { if (confirm('Disable alias?')) { try { log(await api('/model-aliases/' + id, { method: 'DELETE' })); await refresh(); } catch (e) { log(e.message); } } };
+      if ($('adminToken').value) refresh();
     </script>
   </body>
 </html>`;
