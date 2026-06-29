@@ -2,11 +2,11 @@
 
 ## Target Exposure
 
-- Public/VPN exposed: LiteLLM `:4000`.
-- Optional VPN/admin-only: control-plane API and dashboard `:3000`.
+- Public/VPN exposed by Coolify reverse proxy: LiteLLM internal port `4000`.
+- Optional VPN/admin-only by Coolify reverse proxy: control-plane API and dashboard internal port `3000`.
 - Private only: Postgres, Redis, 9Router, 9Router dashboard.
 
-Never expose the 9Router dashboard publicly.
+The Compose file uses `expose`, not host `ports`, so services do not bind host ports like `3000` or `4000`. Never expose the 9Router dashboard publicly.
 
 ## Required Environment
 
@@ -49,6 +49,8 @@ LiteLLM:
 - `postgres`: persistent database volume. Keep private; no public host port is required.
 - `redis`: optional cache/rate-limit support. Keep private; no public host port is required.
 
+No service should publish host ports in production. Let Coolify route domains to container ports.
+
 ## Volumes
 
 - Postgres data volume is required.
@@ -67,7 +69,8 @@ LiteLLM:
 Route developer traffic to LiteLLM only:
 
 ```text
-https://ai.company.internal/v1 -> litellm:4000/v1
+https://llm.apps.anggaprytn.com/v1 -> litellm:4000/v1
+https://llm-admin.apps.anggaprytn.com -> api:3000
 ```
 
 Do not proxy 9Router publicly. If the admin API or `/dashboard` is exposed, put it behind VPN/auth and keep `ADMIN_TOKEN` long and rotated. Dynamic provider API keys stored through the admin API are encrypted with `PROVIDER_SECRET_KEY`, so keep that secret stable across restarts and backups.

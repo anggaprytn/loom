@@ -16,11 +16,13 @@ docker compose up --build
 
 Services:
 
-- Control plane API: `http://localhost:${API_PORT:-3000}`
-- Minimal admin dashboard: `http://localhost:${API_PORT:-3000}/dashboard`
-- LiteLLM proxy: `http://localhost:${LITELLM_PORT:-4000}`
+- Control plane API: internal container port `3000`, route with Coolify to `llm-admin.apps.anggaprytn.com`
+- Minimal admin dashboard: `/dashboard` on the control-plane API origin
+- LiteLLM proxy: internal container port `4000`, route with Coolify to `llm.apps.anggaprytn.com`
 - Postgres: private Compose network only
 - Redis: private Compose network only
+
+The Compose stack does not publish host ports by default. This avoids collisions on shared hosts; use Coolify's reverse proxy or an explicit local override if you need direct localhost access.
 
 The control plane and LiteLLM use separate Postgres schemas: `app` and `litellm`. Keep them separate because LiteLLM manages its own Prisma schema.
 
