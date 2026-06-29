@@ -16,10 +16,17 @@
     "test": "npm run test -w @team-llm-gateway/api",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --schema prisma/schema.prisma",
-    "docker:up": "docker compose up --build"
+    "docker:up": "docker compose up --build",
+    "smoke:gateway": "tsx scripts/smoke/gateway.ts",
+    "smoke:create-user": "tsx scripts/smoke/create-user.ts",
+    "smoke:create-key": "tsx scripts/smoke/create-key.ts",
+    "smoke:chat-completion": "tsx scripts/smoke/chat-completion.ts",
+    "smoke:revoke-key": "tsx scripts/smoke/revoke-key.ts",
+    "smoke:usage": "tsx scripts/smoke/usage.ts"
   },
   "devDependencies": {
     "prettier": "^3.6.2",
+    "tsx": "^4.22.4",
     "typescript": "^5.8.3"
   },
   "dependencies": {

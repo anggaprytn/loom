@@ -7,8 +7,13 @@ import { registerAdminAuth } from './plugins/adminAuth.js';
 import { adminRoutes } from './routes/admin.js';
 import { healthRoutes } from './routes/health.js';
 import { ingestRoutes } from './routes/ingest.js';
+import { HttpLiteLlmAdminClient, type LiteLlmAdminClient } from './services/litellmAdminClient.js';
 
-export async function buildApp(env: Env, prisma: PrismaLike) {
+export async function buildApp(
+  env: Env,
+  prisma: PrismaLike,
+  litellmAdmin: LiteLlmAdminClient = new HttpLiteLlmAdminClient(env),
+) {
   const app = Fastify({
     logger: {
       level: env.LOG_LEVEL,
@@ -21,7 +26,9 @@ export async function buildApp(env: Env, prisma: PrismaLike) {
   registerAdminAuth(app, env);
 
   await app.register(healthRoutes);
-  await app.register(async (scoped) => adminRoutes(scoped, prisma, env), { prefix: '/admin' });
+  await app.register(async (scoped) => adminRoutes(scoped, prisma, env, litellmAdmin), {
+    prefix: '/admin',
+  });
   await app.register(async (scoped) => ingestRoutes(scoped, prisma, env), { prefix: '/ingest' });
 
   app.setErrorHandler((error: FastifyError & { issues?: unknown }, _request, reply) => {

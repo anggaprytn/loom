@@ -54,6 +54,8 @@ model ApiKey {
   id           String         @id @default(cuid())
   prefix       String
   keyHash      String         @unique
+  litellmKeyAlias String?     @unique
+  litellmKeyId    String?
   name         String
   status       ApiKeyStatus   @default(active)
   userId       String
@@ -67,6 +69,7 @@ model ApiKey {
   updatedAt    DateTime       @updatedAt
 
   @@index([prefix])
+  @@index([litellmKeyId])
   @@index([userId])
   @@index([teamId])
   @@index([status])

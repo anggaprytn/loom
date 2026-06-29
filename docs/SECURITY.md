@@ -12,10 +12,10 @@ Impact: unauthorized usage attributed to a user or team.
 
 Controls:
 
-- Store only hashed API keys.
+- Store only hashed local copies of LiteLLM virtual keys.
 - Return plaintext key only once.
 - Support key revocation.
-- Use per-user keys instead of shared keys.
+- Use per-user LiteLLM virtual keys instead of shared keys.
 
 ### Abused Upstream Credential
 
@@ -25,7 +25,7 @@ Controls:
 
 - Keep upstream credentials in env/secret manager only.
 - Do not expose 9router publicly.
-- Rotate `NINE_ROUTER_API_KEY` after suspected compromise.
+- Rotate `ROUTER_API_KEY` after suspected compromise.
 
 ### Runaway Token Usage
 
@@ -43,7 +43,7 @@ Impact: intentional overuse, key sharing, or probing.
 
 Controls:
 
-- Personal keys and usage attribution.
+- Personal LiteLLM virtual keys and usage attribution.
 - Revocation endpoint.
 - No raw prompt or completion storage by default.
 - Admin token required for operational APIs.
@@ -67,3 +67,7 @@ Controls:
 - Keep aliases in `litellm_config.yaml`.
 - Review changes before deploy.
 - Smoke test `/v1/models` and one completion after changes.
+
+## Provider Account Policy
+
+Personal ChatGPT Pro pooling is not production-supported. Upstream provider credentials must belong to authorized company/team/provider-approved accounts and must be supplied through environment variables or a deployment secret manager. Full prompt/response logging remains off by default.

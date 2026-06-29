@@ -1,15 +1,15 @@
 # Codex Usage
 
-Each developer should receive a personal `tlg_live_...` key from the gateway admin. Do not share keys.
+Each developer should receive a personal LiteLLM virtual key, usually `sk-...`, from the gateway admin. Do not share keys.
 
-MVP boundary: these keys are managed by the control plane today. LiteLLM request-time validation against them is the next integration phase. Until that is wired, use the LiteLLM master key only for local upstream smoke tests.
+The control plane creates these keys through LiteLLM. They are accepted by LiteLLM at request time and can be revoked without rotating the upstream 9Router credential.
 
 ## OpenAI-Compatible Provider
 
 Example Codex config:
 
 ```toml
-model = "codex-default"
+model = "code-premium"
 
 [providers.team_llm_gateway]
 name = "team_llm_gateway"
@@ -21,14 +21,17 @@ wire_api = "chat"
 Shell:
 
 ```bash
-export TEAM_LLM_GATEWAY_API_KEY=tlg_live_PERSONAL_KEY
+export TEAM_LLM_GATEWAY_API_KEY=sk_PERSONAL_LITELLM_KEY
 ```
 
 ## Model Aliases
 
-- `codex-default`: default coding route.
-- `codex-premium`: higher capability route.
-- `gpt-5.5`: general route.
-- `gpt-5.5-thinking`: reasoning route.
+- `code-premium`: premium coding route with fallback to balanced and fallback routes.
+- `code-balanced`: balanced coding route with fallback to fallback route.
+- `code-fast`: low-latency coding route.
+- `code-fallback`: fallback coding route.
+- `agent-premium`: premium agent route.
+- `agent-cheap`: low-cost agent route.
+- `codex-default` and `codex-premium`: backward-compatible aliases.
 
 These aliases are stable front-door names. Operators can repoint them in `litellm_config.yaml` without changing developer configs.

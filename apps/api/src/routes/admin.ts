@@ -1,10 +1,18 @@
 import { Prisma, UsageStatus } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { Env } from '../config/env.js';
 import type { PrismaLike } from '../db/prisma.js';
-import { createKeyMaterial } from '../services/keyService.js';
 import { monthWindow } from '../services/budgetService.js';
+import type { LiteLlmAdminClient } from '../services/litellmAdminClient.js';
+import {
+  aggregateLiteLlmUsage,
+  groupLiteLlmUsage,
+  normalizeLiteLlmSpendLog,
+} from '../services/litellmUsageService.js';
+import { normalizeAllowedModels } from '../services/modelPolicy.js';
+import { hashApiKey, keyPrefix } from '../utils/apiKey.js';
 
 const createUserSchema = z.object({
   email: z.string().email(),
@@ -22,11 +30,17 @@ const createKeySchema = z.object({
   userId: z.string().min(1),
   teamId: z.string().min(1).optional(),
   name: z.string().min(1).default('default'),
+  models: z.array(z.string().min(1)).optional(),
+  maxBudget: z.number().positive().optional(),
+  budgetDuration: z.string().min(1).optional(),
+  tpmLimit: z.number().int().positive().optional(),
+  rpmLimit: z.number().int().positive().optional(),
 });
 
 const usageQuerySchema = z.object({
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
+  source: z.enum(['litellm', 'local']).default('litellm'),
 });
 
 const createBudgetSchema = z.object({
@@ -36,7 +50,12 @@ const createBudgetSchema = z.object({
   monthlyCostLimit: z.number().positive().optional(),
 });
 
-export async function adminRoutes(app: FastifyInstance, prisma: PrismaLike, env: Env) {
+export async function adminRoutes(
+  app: FastifyInstance,
+  prisma: PrismaLike,
+  env: Env,
+  litellmAdmin: LiteLlmAdminClient,
+) {
   app.addHook('onRequest', app.verifyAdmin);
 
   app.post('/users', async (request, reply) => {
@@ -71,28 +90,70 @@ export async function adminRoutes(app: FastifyInstance, prisma: PrismaLike, env:
 
   app.post('/keys', async (request, reply) => {
     const input = createKeySchema.parse(request.body);
-    const material = createKeyMaterial(env.API_KEY_PEPPER);
-
-    const key = await prisma.apiKey.create({
-      data: {
-        prefix: material.prefix,
-        keyHash: material.hash,
-        name: input.name,
-        userId: input.userId,
-        teamId: input.teamId,
-      },
-      select: {
-        id: true,
-        prefix: true,
-        name: true,
-        status: true,
-        userId: true,
-        teamId: true,
-        createdAt: true,
-      },
+    const user = await prisma.user.findUnique({
+      where: { id: input.userId },
+      include: { team: true },
     });
 
-    return reply.code(201).send({ ...key, apiKey: material.plaintext });
+    if (!user) {
+      return reply.code(404).send({ error: 'user_not_found' });
+    }
+
+    const teamId = input.teamId ?? user.teamId;
+    const alias = `tlg_${randomUUID()}`;
+    const virtualKeyInput = {
+      alias,
+      userId: user.id,
+      teamId,
+      ownerName: user.name,
+      ownerEmail: user.email,
+      role: user.role,
+      models: normalizeAllowedModels(input.models),
+      budget: {
+        maxBudget: input.maxBudget ?? env.DEFAULT_KEY_MAX_BUDGET,
+        budgetDuration: input.budgetDuration ?? env.DEFAULT_KEY_BUDGET_DURATION,
+        tpmLimit: input.tpmLimit ?? env.DEFAULT_KEY_TPM_LIMIT,
+        rpmLimit: input.rpmLimit ?? env.DEFAULT_KEY_RPM_LIMIT,
+      },
+    };
+
+    await litellmAdmin.ensureUser(virtualKeyInput);
+    await litellmAdmin.ensureTeam(virtualKeyInput);
+    const virtualKey = await litellmAdmin.createVirtualKey(virtualKeyInput);
+    const litellmKeyAlias = virtualKey.keyAlias ?? alias;
+
+    let key;
+    try {
+      key = await prisma.apiKey.create({
+        data: {
+          prefix: keyPrefix(virtualKey.key),
+          keyHash: hashApiKey(virtualKey.key, env.API_KEY_PEPPER),
+          litellmKeyAlias,
+          litellmKeyId: virtualKey.tokenId,
+          name: input.name,
+          userId: input.userId,
+          teamId,
+        },
+        select: {
+          id: true,
+          prefix: true,
+          litellmKeyAlias: true,
+          litellmKeyId: true,
+          name: true,
+          status: true,
+          userId: true,
+          teamId: true,
+          createdAt: true,
+        },
+      });
+    } catch (error) {
+      await litellmAdmin.revokeVirtualKey(litellmKeyAlias).catch((revokeError) => {
+        app.log.error({ revokeError, litellmKeyAlias }, 'failed to clean up LiteLLM key');
+      });
+      throw error;
+    }
+
+    return reply.code(201).send({ ...key, apiKey: virtualKey.key });
   });
 
   app.get('/keys', async () =>
@@ -100,6 +161,8 @@ export async function adminRoutes(app: FastifyInstance, prisma: PrismaLike, env:
       select: {
         id: true,
         prefix: true,
+        litellmKeyAlias: true,
+        litellmKeyId: true,
         name: true,
         status: true,
         userId: true,
@@ -114,6 +177,16 @@ export async function adminRoutes(app: FastifyInstance, prisma: PrismaLike, env:
 
   app.post('/keys/:id/revoke', async (request, reply) => {
     const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    const existing = await prisma.apiKey.findUnique({ where: { id: params.id } });
+
+    if (!existing) {
+      return reply.code(404).send({ error: 'key_not_found' });
+    }
+
+    if (existing.litellmKeyAlias) {
+      await litellmAdmin.revokeVirtualKey(existing.litellmKeyAlias);
+    }
+
     const key = await prisma.apiKey.update({
       where: { id: params.id },
       data: { status: 'revoked', revokedAt: new Date() },
@@ -125,6 +198,20 @@ export async function adminRoutes(app: FastifyInstance, prisma: PrismaLike, env:
 
   app.get('/usage', async (request) => {
     const query = usageQuerySchema.parse(request.query);
+    if (query.source === 'litellm') {
+      const records = await getLiteLlmUsage(litellmAdmin, query);
+
+      return {
+        source: 'litellm',
+        totals: aggregateLiteLlmUsage(records),
+        byDay: dailyLiteLlmRollup(records),
+        byUser: groupLiteLlmUsage(records, 'userId'),
+        byTeam: groupLiteLlmUsage(records, 'teamId'),
+        byModel: groupLiteLlmUsage(records, 'model'),
+        byKey: groupLiteLlmUsage(records, 'keyAlias'),
+      };
+    }
+
     const where = usageWhere(query);
     const [grouped, dailyRecords] = await Promise.all([
       prisma.usageRecord.groupBy({
@@ -152,6 +239,7 @@ export async function adminRoutes(app: FastifyInstance, prisma: PrismaLike, env:
     ]);
 
     return {
+      source: 'local',
       totals: rollup(grouped),
       byDay: dailyRollup(dailyRecords),
       byStatus: grouped.map((row) => ({
@@ -167,6 +255,10 @@ export async function adminRoutes(app: FastifyInstance, prisma: PrismaLike, env:
 
   app.get('/usage/by-user', async (request) => {
     const query = usageQuerySchema.parse(request.query);
+    if (query.source === 'litellm') {
+      return groupLiteLlmUsage(await getLiteLlmUsage(litellmAdmin, query), 'userId');
+    }
+
     const rows = await prisma.usageRecord.groupBy({
       by: ['userId'],
       where: usageWhere(query),
@@ -179,6 +271,10 @@ export async function adminRoutes(app: FastifyInstance, prisma: PrismaLike, env:
 
   app.get('/usage/by-model', async (request) => {
     const query = usageQuerySchema.parse(request.query);
+    if (query.source === 'litellm') {
+      return groupLiteLlmUsage(await getLiteLlmUsage(litellmAdmin, query), 'model');
+    }
+
     const rows = await prisma.usageRecord.groupBy({
       by: ['model'],
       where: usageWhere(query),
@@ -367,6 +463,28 @@ function dailyRollup(
   }
 
   return Array.from(buckets.values());
+}
+
+async function getLiteLlmUsage(
+  litellmAdmin: LiteLlmAdminClient,
+  query: { from?: string; to?: string },
+) {
+  const logs = await litellmAdmin.getSpendLogs(query);
+  return logs.map(normalizeLiteLlmSpendLog).filter((record) => record !== null);
+}
+
+function dailyLiteLlmRollup(records: Awaited<ReturnType<typeof getLiteLlmUsage>>) {
+  const buckets = new Map<string, typeof records>();
+
+  for (const record of records) {
+    const date = record.timestamp.toISOString().slice(0, 10);
+    buckets.set(date, [...(buckets.get(date) ?? []), record]);
+  }
+
+  return [...buckets.entries()].map(([date, bucketRecords]) => ({
+    date,
+    ...aggregateLiteLlmUsage(bucketRecords),
+  }));
 }
 
 function decimalToString(value: Prisma.Decimal | null | undefined): string {

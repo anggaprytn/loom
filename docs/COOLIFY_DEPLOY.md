@@ -1,0 +1,77 @@
+# Coolify Deploy
+
+## Target Exposure
+
+- Public/VPN exposed: LiteLLM `:4000`.
+- Optional VPN/admin-only: control-plane API `:3000`.
+- Private only: Postgres, Redis, 9Router, 9Router dashboard.
+
+Never expose the 9Router dashboard publicly.
+
+## Required Environment
+
+Control plane:
+
+- `DATABASE_URL`
+- `DIRECT_URL`
+- `LITELLM_DATABASE_URL`
+- `ADMIN_TOKEN`
+- `API_KEY_PEPPER`
+- `LITELLM_PROXY_URL`
+- `LITELLM_MASTER_KEY`
+- `ROUTER_BASE_URL` or legacy `NINE_ROUTER_BASE_URL`
+- `ROUTER_API_KEY` or legacy `NINE_ROUTER_API_KEY`
+- `ROUTER_PREMIUM_MODEL`
+- `ROUTER_BALANCED_MODEL`
+- `ROUTER_FAST_MODEL`
+- `ROUTER_FALLBACK_MODEL`
+- `ROUTER_AGENT_PREMIUM_MODEL`
+- `ROUTER_AGENT_CHEAP_MODEL`
+
+Set model values as LiteLLM model strings, for example `openai/<9router-model-id>`, because the router is exposed to LiteLLM as an OpenAI-compatible backend.
+
+LiteLLM:
+
+- `DATABASE_URL`
+- `LITELLM_MASTER_KEY`
+- `LITELLM_SALT_KEY`
+- `ROUTER_BASE_URL`
+- `ROUTER_API_KEY`
+- all `ROUTER_*_MODEL` variables above
+
+## Service Map
+
+- `litellm`: reverse-proxied OpenAI-compatible endpoint.
+- `api`: admin/control-plane API. Prefer VPN, IP allowlist, or upstream auth.
+- `postgres`: persistent database volume. Keep private; no public host port is required.
+- `redis`: optional cache/rate-limit support. Keep private; no public host port is required.
+
+## Volumes
+
+- Postgres data volume is required.
+- Initialize or pre-create `app` and `litellm` schemas. The included Compose stack mounts `docker/postgres/init/001-schemas.sql` for fresh volumes.
+- LiteLLM config is mounted read-only from `litellm_config.yaml`.
+
+## Health Checks
+
+- API: `GET /health`.
+- LiteLLM: `GET /health` or `GET /v1/models` with a valid key.
+- Postgres: `pg_isready`.
+- Redis: `redis-cli ping`.
+
+## Reverse Proxy Notes
+
+Route developer traffic to LiteLLM only:
+
+```text
+https://ai.company.internal/v1 -> litellm:4000/v1
+```
+
+Do not proxy 9Router publicly. If the admin API is exposed, put it behind VPN/auth and keep `ADMIN_TOKEN` long and rotated.
+
+## Production Notes
+
+- Store secrets in Coolify environment/secrets, not in git.
+- Rotate `ROUTER_API_KEY` and `LITELLM_MASTER_KEY` after suspected compromise.
+- Keep prompt/response logging disabled unless reviewed and approved.
+- Run `npm run smoke:gateway` after deployment with a temporary user/key.

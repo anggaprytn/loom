@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 export const API_KEY_PREFIX = 'tlg_live';
+export const LITELLM_KEY_PREFIX = 'sk';
 
 export type GeneratedApiKey = {
   plaintext: string;
@@ -10,6 +11,15 @@ export type GeneratedApiKey = {
 
 export function hashApiKey(plaintext: string, pepper: string): string {
   return createHash('sha256').update(`${pepper}:${plaintext}`).digest('hex');
+}
+
+export function keyPrefix(plaintext: string): string {
+  const parts = plaintext.split('-');
+  if (parts.length > 1 && parts[0] === LITELLM_KEY_PREFIX) {
+    return LITELLM_KEY_PREFIX;
+  }
+
+  return plaintext.split('_').slice(0, 2).join('_') || plaintext.slice(0, 8);
 }
 
 export function generateApiKey(pepper: string): GeneratedApiKey {

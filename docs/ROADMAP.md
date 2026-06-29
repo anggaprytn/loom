@@ -12,10 +12,14 @@
 
 ## Phase 2: Proxy Enforcement
 
+Status: implemented as LiteLLM virtual-key bridging.
+
 - Integrate LiteLLM virtual keys or auth callbacks with control-plane keys.
 - Enforce active/revoked key status before forwarding.
 - Enforce monthly token and cost budgets at request time.
 - Forward LiteLLM success/error logs into `/ingest/usage`.
+
+Current implementation creates and revokes LiteLLM virtual keys directly, attaches user/team metadata, assigns model allowlists, maps budget fields supported by LiteLLM, and reads LiteLLM spend logs for usage views. `/ingest/usage` remains available for future custom log forwarding.
 
 ## Phase 3: Operations
 

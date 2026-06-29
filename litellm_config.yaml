@@ -1,42 +1,75 @@
 # LiteLLM public/front-door proxy configuration.
-# Users call LiteLLM with their personal team-llm-gateway key. For this MVP,
-# the control plane stores and reports keys; proxy enforcement is documented as
-# the next integration phase.
+# Phase 2: users call LiteLLM with virtual keys created by the control plane via
+# LiteLLM's admin API. LiteLLM is the request-time auth, model, budget, and
+# spend-tracking authority.
 #
-# To swap upstream providers later, keep the public model_name aliases stable
-# and change litellm_params.api_base/api_key/model to the new OpenAI-compatible
-# provider values.
+# 9Router stays private. The ROUTER_* env vars should point to an
+# OpenAI-compatible endpoint reachable only by LiteLLM on the Docker/private
+# network. ROUTER_* is preferred; NINE_ROUTER_* remains documented for older
+# operators, but LiteLLM reads ROUTER_* directly here.
 
 model_list:
-  - model_name: gpt-5.5
+  - model_name: code-premium
     litellm_params:
-      model: openai/gpt-5.5
-      api_base: os.environ/NINE_ROUTER_BASE_URL
-      api_key: os.environ/NINE_ROUTER_API_KEY
+      model: os.environ/ROUTER_PREMIUM_MODEL
+      api_base: os.environ/ROUTER_BASE_URL
+      api_key: os.environ/ROUTER_API_KEY
 
-  - model_name: gpt-5.5-thinking
+  - model_name: code-balanced
     litellm_params:
-      model: openai/gpt-5.5-thinking
-      api_base: os.environ/NINE_ROUTER_BASE_URL
-      api_key: os.environ/NINE_ROUTER_API_KEY
+      model: os.environ/ROUTER_BALANCED_MODEL
+      api_base: os.environ/ROUTER_BASE_URL
+      api_key: os.environ/ROUTER_API_KEY
 
+  - model_name: code-fast
+    litellm_params:
+      model: os.environ/ROUTER_FAST_MODEL
+      api_base: os.environ/ROUTER_BASE_URL
+      api_key: os.environ/ROUTER_API_KEY
+
+  - model_name: code-fallback
+    litellm_params:
+      model: os.environ/ROUTER_FALLBACK_MODEL
+      api_base: os.environ/ROUTER_BASE_URL
+      api_key: os.environ/ROUTER_API_KEY
+
+  - model_name: agent-premium
+    litellm_params:
+      model: os.environ/ROUTER_AGENT_PREMIUM_MODEL
+      api_base: os.environ/ROUTER_BASE_URL
+      api_key: os.environ/ROUTER_API_KEY
+
+  - model_name: agent-cheap
+    litellm_params:
+      model: os.environ/ROUTER_AGENT_CHEAP_MODEL
+      api_base: os.environ/ROUTER_BASE_URL
+      api_key: os.environ/ROUTER_API_KEY
+
+  # Backward-compatible aliases from Phase 1 docs.
   - model_name: codex-default
     litellm_params:
-      model: openai/codex-default
-      api_base: os.environ/NINE_ROUTER_BASE_URL
-      api_key: os.environ/NINE_ROUTER_API_KEY
+      model: os.environ/ROUTER_BALANCED_MODEL
+      api_base: os.environ/ROUTER_BASE_URL
+      api_key: os.environ/ROUTER_API_KEY
 
   - model_name: codex-premium
     litellm_params:
-      model: openai/codex-premium
-      api_base: os.environ/NINE_ROUTER_BASE_URL
-      api_key: os.environ/NINE_ROUTER_API_KEY
+      model: os.environ/ROUTER_PREMIUM_MODEL
+      api_base: os.environ/ROUTER_BASE_URL
+      api_key: os.environ/ROUTER_API_KEY
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   database_url: os.environ/DATABASE_URL
+  store_model_in_db: true
 
 litellm_settings:
   drop_params: true
   request_timeout: 600
   set_verbose: false
+  success_callback: ['proxy_base_cost_tracking']
+  failure_callback: ['proxy_base_cost_tracking']
+  fallbacks:
+    - code-premium: ['code-balanced', 'code-fallback']
+    - code-balanced: ['code-fallback']
+    - agent-premium: ['agent-cheap']
