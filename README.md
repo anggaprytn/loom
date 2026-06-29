@@ -17,6 +17,7 @@ docker compose up --build
 Services:
 
 - Control plane API: `http://localhost:${API_PORT:-3000}`
+- Minimal admin dashboard: `http://localhost:${API_PORT:-3000}/dashboard`
 - LiteLLM proxy: `http://localhost:${LITELLM_PORT:-4000}`
 - Postgres: private Compose network only
 - Redis: private Compose network only
@@ -105,6 +106,24 @@ curl -s http://localhost:3000/admin/model-aliases \
 
 Provider API keys stored through the registry are encrypted at rest with `PROVIDER_SECRET_KEY`. List responses only return `apiKeyLast4`.
 
+Rotate a provider key and resync aliases:
+
+```bash
+curl -s http://localhost:3000/admin/providers/PROVIDER_ID/rotate-key \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"apiKey":"NEW_PROVIDER_API_KEY","syncAliases":true}'
+```
+
+Disable a provider and its aliases:
+
+```bash
+curl -s -X DELETE http://localhost:3000/admin/providers/PROVIDER_ID \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+The dashboard at `/dashboard` is a lightweight operator UI for the same API. It stores only the admin token in the browser's local storage and should be exposed only behind VPN/internal auth.
+
 Call LiteLLM with the returned virtual key:
 
 ```bash
@@ -154,6 +173,15 @@ Mocked upstream mode requires LiteLLM to be started with `ROUTER_BASE_URL=http:/
 
 ```bash
 SMOKE_MOCK_UPSTREAM=1 npm run smoke:gateway
+```
+
+Real provider registry smoke:
+
+```bash
+REAL_PROVIDER_BASE_URL=https://ai.company.com/v1 \
+REAL_PROVIDER_API_KEY=provider-key \
+REAL_PROVIDER_MODEL=openai/gemini-2.5-pro \
+npm run smoke:real-provider
 ```
 
 ## Development

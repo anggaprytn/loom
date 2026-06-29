@@ -5,6 +5,7 @@ import type { Env } from './config/env.js';
 import type { PrismaLike } from './db/prisma.js';
 import { registerAdminAuth } from './plugins/adminAuth.js';
 import { adminRoutes } from './routes/admin.js';
+import { dashboardRoutes } from './routes/dashboard.js';
 import { healthRoutes } from './routes/health.js';
 import { ingestRoutes } from './routes/ingest.js';
 import { HttpLiteLlmAdminClient, type LiteLlmAdminClient } from './services/litellmAdminClient.js';
@@ -26,6 +27,7 @@ export async function buildApp(
   registerAdminAuth(app, env);
 
   await app.register(healthRoutes);
+  await app.register(dashboardRoutes, { prefix: '/dashboard' });
   await app.register(async (scoped) => adminRoutes(scoped, prisma, env, litellmAdmin), {
     prefix: '/admin',
   });

@@ -30,8 +30,11 @@ Status: implemented as provider registry APIs and LiteLLM dynamic model sync.
 - Add model alias registry and LiteLLM `/model/new` sync.
 - Add provider health checks against `/v1/models`.
 - Add redacted LiteLLM model config render endpoint for operators.
+- Add provider update, soft delete/disable, and provider API key rotation.
+- Add minimal admin dashboard shell for users, keys, providers, aliases, and usage.
+- Add real-provider smoke script.
 
-Not included: browser session/password automation, provider OAuth UX, or full web dashboard.
+Not included: browser session/password automation, provider OAuth UX, polished dashboard UX, or automated LiteLLM model deletion on alias disable.
 
 ## Phase 4: Operations Hardening
 

@@ -73,6 +73,25 @@ const createProviderSchema = z.object({
   enabled: z.boolean().default(true),
 });
 
+const updateProviderSchema = z.object({
+  slug: z
+    .string()
+    .min(1)
+    .regex(/^[a-z0-9][a-z0-9-]*$/)
+    .optional(),
+  name: z.string().min(1).optional(),
+  baseUrl: z.string().url().optional(),
+  authType: z.enum(['api_key', 'none']).optional(),
+  apiKey: z.string().min(1).optional(),
+  enabled: z.boolean().optional(),
+  syncAliases: z.boolean().default(false),
+});
+
+const rotateProviderKeySchema = z.object({
+  apiKey: z.string().min(1),
+  syncAliases: z.boolean().default(true),
+});
+
 const createModelAliasSchema = z.object({
   alias: z
     .string()
@@ -82,6 +101,19 @@ const createModelAliasSchema = z.object({
   upstreamModel: z.string().min(1),
   description: z.string().min(1).optional(),
   enabled: z.boolean().default(true),
+  syncToLiteLlm: z.boolean().default(true),
+});
+
+const updateModelAliasSchema = z.object({
+  alias: z
+    .string()
+    .min(1)
+    .regex(/^[a-z0-9][a-z0-9-]*$/)
+    .optional(),
+  providerId: z.string().min(1).optional(),
+  upstreamModel: z.string().min(1).optional(),
+  description: z.string().min(1).nullable().optional(),
+  enabled: z.boolean().optional(),
   syncToLiteLlm: z.boolean().default(true),
 });
 
@@ -385,6 +417,95 @@ export async function adminRoutes(
     }),
   );
 
+  app.patch('/providers/:id', async (request, reply) => {
+    const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    const input = updateProviderSchema.parse(request.body);
+    const existing = await prisma.provider.findUnique({ where: { id: params.id } });
+
+    if (!existing) {
+      return reply.code(404).send({ error: 'provider_not_found' });
+    }
+
+    const nextAuthType = input.authType ?? existing.authType;
+    if (nextAuthType === 'api_key' && !input.apiKey && !existing.encryptedApiKey) {
+      return reply.code(400).send({ error: 'apiKey is required for api_key providers' });
+    }
+
+    const provider = await prisma.provider.update({
+      where: { id: params.id },
+      data: {
+        slug: input.slug,
+        name: input.name,
+        baseUrl: input.baseUrl?.replace(/\/$/, ''),
+        authType: input.authType,
+        encryptedApiKey:
+          input.authType === 'none'
+            ? null
+            : input.apiKey
+              ? encryptProviderSecret(input.apiKey, env.PROVIDER_SECRET_KEY)
+              : undefined,
+        apiKeyLast4:
+          input.authType === 'none' ? null : input.apiKey ? secretLast4(input.apiKey) : undefined,
+        enabled: input.enabled,
+      },
+      select: providerSelect(),
+    });
+
+    if (input.syncAliases && provider.enabled) {
+      await syncProviderAliases(prisma, litellmAdmin, provider.id, env.PROVIDER_SECRET_KEY);
+    }
+
+    return reply.send(provider);
+  });
+
+  app.post('/providers/:id/rotate-key', async (request, reply) => {
+    const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    const input = rotateProviderKeySchema.parse(request.body);
+    const existing = await prisma.provider.findUnique({ where: { id: params.id } });
+
+    if (!existing) {
+      return reply.code(404).send({ error: 'provider_not_found' });
+    }
+
+    const provider = await prisma.provider.update({
+      where: { id: params.id },
+      data: {
+        authType: 'api_key',
+        encryptedApiKey: encryptProviderSecret(input.apiKey, env.PROVIDER_SECRET_KEY),
+        apiKeyLast4: secretLast4(input.apiKey),
+      },
+      select: providerSelect(),
+    });
+
+    const syncedAliases =
+      input.syncAliases && provider.enabled
+        ? await syncProviderAliases(prisma, litellmAdmin, provider.id, env.PROVIDER_SECRET_KEY)
+        : 0;
+
+    return reply.send({ ...provider, rotated: true, syncedAliases });
+  });
+
+  app.delete('/providers/:id', async (request, reply) => {
+    const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    const existing = await prisma.provider.findUnique({ where: { id: params.id } });
+
+    if (!existing) {
+      return reply.code(404).send({ error: 'provider_not_found' });
+    }
+
+    await prisma.modelAlias.updateMany({
+      where: { providerId: params.id },
+      data: { enabled: false },
+    });
+    const provider = await prisma.provider.update({
+      where: { id: params.id },
+      data: { enabled: false },
+      select: providerSelect(),
+    });
+
+    return reply.send({ ...provider, deleted: false, disabled: true });
+  });
+
   app.get('/providers/:id/health', async (request, reply) => {
     const params = z.object({ id: z.string().min(1) }).parse(request.params);
     const provider = await prisma.provider.findUnique({ where: { id: params.id } });
@@ -448,6 +569,41 @@ export async function adminRoutes(
     return aliases.map(formatModelAlias);
   });
 
+  app.patch('/model-aliases/:id', async (request, reply) => {
+    const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    const input = updateModelAliasSchema.parse(request.body);
+    const existing = await prisma.modelAlias.findUnique({ where: { id: params.id } });
+
+    if (!existing) {
+      return reply.code(404).send({ error: 'model_alias_not_found' });
+    }
+
+    if (input.providerId) {
+      const provider = await prisma.provider.findUnique({ where: { id: input.providerId } });
+      if (!provider) {
+        return reply.code(404).send({ error: 'provider_not_found' });
+      }
+    }
+
+    const alias = await prisma.modelAlias.update({
+      where: { id: params.id },
+      data: {
+        alias: input.alias,
+        providerId: input.providerId,
+        upstreamModel: input.upstreamModel,
+        description: input.description,
+        enabled: input.enabled,
+      },
+      include: { provider: true },
+    });
+
+    if (input.syncToLiteLlm && alias.enabled && alias.provider.enabled) {
+      await syncAliasToLiteLlm(alias, litellmAdmin, env.PROVIDER_SECRET_KEY);
+    }
+
+    return reply.send(formatModelAlias(alias));
+  });
+
   app.post('/model-aliases/:id/sync', async (request, reply) => {
     const params = z.object({ id: z.string().min(1) }).parse(request.params);
     const alias = await prisma.modelAlias.findUnique({
@@ -467,6 +623,23 @@ export async function adminRoutes(
     await litellmAdmin.upsertModel(buildLiteLlmModelPayload(target));
 
     return reply.send({ id: alias.id, alias: alias.alias, synced: true });
+  });
+
+  app.delete('/model-aliases/:id', async (request, reply) => {
+    const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    const existing = await prisma.modelAlias.findUnique({ where: { id: params.id } });
+
+    if (!existing) {
+      return reply.code(404).send({ error: 'model_alias_not_found' });
+    }
+
+    const alias = await prisma.modelAlias.update({
+      where: { id: params.id },
+      data: { enabled: false },
+      include: { provider: true },
+    });
+
+    return reply.send({ ...formatModelAlias(alias), deleted: false, disabled: true });
   });
 
   app.get('/litellm/model-config', async () => {
@@ -563,6 +736,43 @@ function aliasToTarget(
       : null,
     description: alias.description,
   };
+}
+
+async function syncProviderAliases(
+  prisma: PrismaLike,
+  litellmAdmin: LiteLlmAdminClient,
+  providerId: string,
+  providerSecretKey: string,
+) {
+  const aliases = await prisma.modelAlias.findMany({
+    where: { providerId, enabled: true, provider: { enabled: true } },
+    include: { provider: true },
+  });
+
+  for (const alias of aliases) {
+    await syncAliasToLiteLlm(alias, litellmAdmin, providerSecretKey);
+  }
+
+  return aliases.length;
+}
+
+async function syncAliasToLiteLlm(
+  alias: {
+    alias: string;
+    upstreamModel: string;
+    description: string | null;
+    provider: {
+      slug: string;
+      baseUrl: string;
+      authType: 'api_key' | 'none';
+      encryptedApiKey: string | null;
+    };
+  },
+  litellmAdmin: LiteLlmAdminClient,
+  providerSecretKey: string,
+) {
+  const target = aliasToTarget(alias, providerSecretKey);
+  await litellmAdmin.upsertModel(buildLiteLlmModelPayload(target));
 }
 
 function formatModelAlias(alias: {

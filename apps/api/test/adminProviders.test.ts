@@ -79,6 +79,34 @@ describe('admin provider routes', () => {
       },
     });
 
+    const rotateResponse = await app.inject({
+      method: 'POST',
+      url: '/admin/providers/provider-1/rotate-key',
+      headers: { authorization: `Bearer ${env.ADMIN_TOKEN}` },
+      payload: {
+        apiKey: 'rotated-provider-key',
+        syncAliases: true,
+      },
+    });
+
+    expect(rotateResponse.statusCode).toBe(200);
+    expect(rotateResponse.json()).toMatchObject({ rotated: true, syncedAliases: 1 });
+    expect(litellm.models[1]).toMatchObject({
+      model_name: 'code-premium',
+      litellm_params: {
+        api_key: 'rotated-provider-key',
+      },
+    });
+
+    const deleteResponse = await app.inject({
+      method: 'DELETE',
+      url: '/admin/providers/provider-1',
+      headers: { authorization: `Bearer ${env.ADMIN_TOKEN}` },
+    });
+
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(deleteResponse.json()).toMatchObject({ disabled: true, enabled: false });
+
     await app.close();
   });
 });
@@ -125,6 +153,10 @@ function createMockPrisma() {
         return selectProvider(providerRecord);
       },
       findUnique: async () => providerRecord,
+      update: async (payload: { data: Partial<typeof providerRecord> }) => {
+        Object.assign(providerRecord, payload.data);
+        return selectProvider(providerRecord);
+      },
     },
     modelAlias: {
       create: async (payload: {
@@ -145,6 +177,20 @@ function createMockPrisma() {
         updatedAt: new Date('2026-06-30T00:00:00.000Z'),
         provider: providerRecord,
       }),
+      findMany: async () => [
+        {
+          id: 'alias-1',
+          alias: 'code-premium',
+          providerId: 'provider-1',
+          upstreamModel: 'openai/gemini-2.5-pro',
+          enabled: true,
+          description: null,
+          createdAt: new Date('2026-06-30T00:00:00.000Z'),
+          updatedAt: new Date('2026-06-30T00:00:00.000Z'),
+          provider: providerRecord,
+        },
+      ],
+      updateMany: async () => ({ count: 1 }),
     },
   };
 

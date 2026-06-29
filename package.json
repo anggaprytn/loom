@@ -22,7 +22,8 @@
     "smoke:create-key": "tsx scripts/smoke/create-key.ts",
     "smoke:chat-completion": "tsx scripts/smoke/chat-completion.ts",
     "smoke:revoke-key": "tsx scripts/smoke/revoke-key.ts",
-    "smoke:usage": "tsx scripts/smoke/usage.ts"
+    "smoke:usage": "tsx scripts/smoke/usage.ts",
+    "smoke:real-provider": "tsx scripts/smoke/real-provider.ts"
   },
   "devDependencies": {
     "prettier": "^3.6.2",

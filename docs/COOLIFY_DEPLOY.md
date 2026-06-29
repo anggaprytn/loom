@@ -3,7 +3,7 @@
 ## Target Exposure
 
 - Public/VPN exposed: LiteLLM `:4000`.
-- Optional VPN/admin-only: control-plane API `:3000`.
+- Optional VPN/admin-only: control-plane API and dashboard `:3000`.
 - Private only: Postgres, Redis, 9Router, 9Router dashboard.
 
 Never expose the 9Router dashboard publicly.
@@ -70,7 +70,7 @@ Route developer traffic to LiteLLM only:
 https://ai.company.internal/v1 -> litellm:4000/v1
 ```
 
-Do not proxy 9Router publicly. If the admin API is exposed, put it behind VPN/auth and keep `ADMIN_TOKEN` long and rotated. Dynamic provider API keys stored through the admin API are encrypted with `PROVIDER_SECRET_KEY`, so keep that secret stable across restarts and backups.
+Do not proxy 9Router publicly. If the admin API or `/dashboard` is exposed, put it behind VPN/auth and keep `ADMIN_TOKEN` long and rotated. Dynamic provider API keys stored through the admin API are encrypted with `PROVIDER_SECRET_KEY`, so keep that secret stable across restarts and backups.
 
 ## Production Notes
 

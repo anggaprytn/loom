@@ -56,6 +56,58 @@ curl -s http://localhost:3000/admin/model-aliases \
 
 Developers keep using `code-premium` regardless of whether it points to 9Router, `ai.company.com`, or another OpenAI-compatible backend.
 
+## Dashboard
+
+Open the minimal admin dashboard:
+
+```text
+http://localhost:3000/dashboard
+```
+
+For deployment, expose it only on the admin API origin behind VPN, IP allowlist, or upstream auth. The page is a thin API client: it asks for `ADMIN_TOKEN`, stores it in browser local storage, and calls `/admin/*` with bearer auth.
+
+## Provider Rotation and Disable
+
+Rotate a provider key:
+
+```bash
+curl -s http://localhost:3000/admin/providers/PROVIDER_ID/rotate-key \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"apiKey":"NEW_PROVIDER_API_KEY","syncAliases":true}'
+```
+
+Update provider metadata:
+
+```bash
+curl -s -X PATCH http://localhost:3000/admin/providers/PROVIDER_ID \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"baseUrl":"https://ai.company.com/v1","syncAliases":true}'
+```
+
+Disable a provider and all of its local aliases:
+
+```bash
+curl -s -X DELETE http://localhost:3000/admin/providers/PROVIDER_ID \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+Delete is intentionally a soft disable. LiteLLM model deletion is not automated yet, so disabling avoids silently breaking active traffic while keeping an audit trail.
+
+## Real Provider Smoke
+
+After setting a real OpenAI-compatible provider credential:
+
+```bash
+REAL_PROVIDER_BASE_URL=https://ai.company.com/v1 \
+REAL_PROVIDER_API_KEY=provider-key \
+REAL_PROVIDER_MODEL=openai/gemini-2.5-pro \
+npm run smoke:real-provider
+```
+
+The script creates a temporary provider, alias, user, LiteLLM virtual key, and sends one chat completion through LiteLLM.
+
 ## Revoke a Team Key
 
 ```bash
