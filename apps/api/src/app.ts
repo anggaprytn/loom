@@ -1,6 +1,6 @@
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
-import Fastify, { type FastifyError } from 'fastify';
+import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import type { Env } from './config/env.js';
 import type { PrismaLike } from './db/prisma.js';
 import { registerAdminAuth } from './plugins/adminAuth.js';
@@ -24,6 +24,7 @@ export async function buildApp(
 
   await app.register(helmet);
   await app.register(cors, { origin: false });
+  registerJsonParser(app);
   registerAdminAuth(app, env);
 
   await app.register(healthRoutes);
@@ -58,4 +59,21 @@ export async function buildApp(
   });
 
   return app;
+}
+
+function registerJsonParser(app: FastifyInstance) {
+  app.removeContentTypeParser('application/json');
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_request, body, done) => {
+    if (!body) {
+      done(null, {});
+      return;
+    }
+
+    try {
+      const rawBody = typeof body === 'string' ? body : body.toString('utf8');
+      done(null, JSON.parse(rawBody));
+    } catch (error) {
+      done(error as Error, undefined);
+    }
+  });
 }

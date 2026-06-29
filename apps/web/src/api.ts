@@ -96,13 +96,15 @@ export class ApiError extends Error {
 }
 
 async function request<T>(token: string, path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  headers.set('authorization', `Bearer ${token}`);
+  if (init.body !== undefined && !headers.has('content-type')) {
+    headers.set('content-type', 'application/json');
+  }
+
   const response = await fetch(`/admin${path}`, {
     ...init,
-    headers: {
-      authorization: `Bearer ${token}`,
-      'content-type': 'application/json',
-      ...init.headers,
-    },
+    headers,
   });
   const text = await response.text();
   let body: unknown = null;
