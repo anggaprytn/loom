@@ -14,7 +14,7 @@ export function buildLiteLlmModelPayload(target: ProviderModelTarget) {
   return {
     model_name: target.alias,
     litellm_params: {
-      model: target.upstreamModel,
+      model: normalizeLiteLlmOpenAiModel(target.upstreamModel),
       api_base: target.providerBaseUrl,
       ...(target.providerAuthType === 'api_key' ? { api_key: target.apiKey } : {}),
     },
@@ -26,13 +26,21 @@ export function buildLiteLlmModelPayload(target: ProviderModelTarget) {
   };
 }
 
+function normalizeLiteLlmOpenAiModel(model: string) {
+  if (/^(openai|azure|anthropic|gemini|vertex_ai|bedrock|cohere|mistral|xai)\//.test(model)) {
+    return model;
+  }
+
+  return `openai/${model}`;
+}
+
 export function renderLiteLlmModelConfig(targets: ProviderModelTarget[]): string {
   const lines = ['model_list:'];
 
   for (const target of targets) {
     lines.push(`  - model_name: ${target.alias}`);
     lines.push('    litellm_params:');
-    lines.push(`      model: ${target.upstreamModel}`);
+    lines.push(`      model: ${normalizeLiteLlmOpenAiModel(target.upstreamModel)}`);
     lines.push(`      api_base: ${target.providerBaseUrl}`);
     if (target.providerAuthType === 'api_key') {
       lines.push('      api_key: <redacted>');

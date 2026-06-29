@@ -30,6 +30,19 @@ describe('provider registry', () => {
     });
   });
 
+  it('prefixes OpenAI-compatible upstream aliases for LiteLLM routing', () => {
+    const payload = buildLiteLlmModelPayload({
+      alias: 'code-premium',
+      providerSlug: '9router',
+      providerBaseUrl: 'https://router.example/v1',
+      providerAuthType: 'api_key',
+      upstreamModel: 'cx/gpt-5.3-codex-spark',
+      apiKey: 'provider-key',
+    });
+
+    expect(payload.litellm_params.model).toBe('openai/cx/gpt-5.3-codex-spark');
+  });
+
   it('renders redacted LiteLLM config for operator review', () => {
     const yaml = renderLiteLlmModelConfig([
       {
