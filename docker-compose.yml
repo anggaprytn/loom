@@ -9,7 +9,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}"']
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -p 5432']
       interval: 5s
       timeout: 5s
       retries: 30
@@ -40,10 +40,13 @@ services:
       - '3000'
     depends_on:
       postgres:
-        condition: service_healthy
+        condition: service_started
       redis:
-        condition: service_healthy
-    command: sh -c "npx prisma migrate deploy --schema prisma/schema.prisma && node apps/api/dist/server.js"
+        condition: service_started
+    command: >
+      sh -c "node -e \"const net=require('net');let n=0;const wait=()=>{const s=net.connect(5432,'postgres');s.on('connect',()=>process.exit(0));s.on('error',()=>{if(++n>60)process.exit(1);setTimeout(wait,1000);});};wait();\"
+      && npx prisma migrate deploy --schema prisma/schema.prisma
+      && node apps/api/dist/server.js"
 
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
@@ -60,7 +63,7 @@ services:
       - '4000'
     depends_on:
       postgres:
-        condition: service_healthy
+        condition: service_started
 
 volumes:
   postgres_data:
