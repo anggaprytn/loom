@@ -76,9 +76,11 @@ https://llm-admin.apps.anggaprytn.com -> api:3000
 For Docker Compose apps in Coolify, the internal port must be part of the service FQDN mapping. This Compose file sets:
 
 ```text
-SERVICE_FQDN_API_3000=https://llm-admin.apps.anggaprytn.com
-SERVICE_FQDN_LITELLM_4000=https://llm.apps.anggaprytn.com
+SERVICE_FQDN_ADMIN_3000=llm-admin.apps.anggaprytn.com
+SERVICE_FQDN_GATEWAY_4000=llm.apps.anggaprytn.com
 ```
+
+Use bare hostnames for `SERVICE_FQDN_*`; do not include `https://`. Coolify attaches TLS at the proxy layer.
 
 If configuring domains in the UI manually, attach `llm-admin.apps.anggaprytn.com` to service `api` port `3000`, and `llm.apps.anggaprytn.com` to service `litellm` port `4000`.
 
