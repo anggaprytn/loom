@@ -17,7 +17,8 @@ docker compose up --build
 Services:
 
 - Control plane API: internal container port `3000`, route with Coolify to `llm-admin.apps.anggaprytn.com`
-- Minimal admin dashboard: `/dashboard` on the control-plane API origin
+- React admin console: `apps/web`, run locally at `http://localhost:5173` with `/admin/*` proxied to the control-plane API
+- Minimal fallback dashboard: `/dashboard` on the control-plane API origin
 - LiteLLM proxy: internal container port `4000`, route with Coolify to `llm.apps.anggaprytn.com`
 - Postgres: private Compose network only
 - Redis: private Compose network only
@@ -31,6 +32,15 @@ Health check:
 ```bash
 curl http://localhost:3000/health
 ```
+
+Admin web development:
+
+```bash
+npm run dev:api
+npm run dev:web
+```
+
+Open `http://localhost:5173`. The Vite dev server proxies admin API calls to `http://localhost:3000`.
 
 ## Admin Examples
 

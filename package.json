@@ -5,12 +5,15 @@
   "description": "Self-hosted internal LLM gateway control plane for LiteLLM and OpenAI-compatible upstreams.",
   "type": "module",
   "workspaces": [
-    "apps/api"
+    "apps/api",
+    "apps/web"
   ],
   "scripts": {
-    "build": "npm run build -w @team-llm-gateway/api",
+    "build": "npm run build -w @team-llm-gateway/api && npm run build -w @team-llm-gateway/web",
     "dev": "npm run dev -w @team-llm-gateway/api",
-    "lint": "npm run lint -w @team-llm-gateway/api",
+    "dev:api": "npm run dev -w @team-llm-gateway/api",
+    "dev:web": "npm run dev -w @team-llm-gateway/web",
+    "lint": "npm run lint -w @team-llm-gateway/api && npm run lint -w @team-llm-gateway/web",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "npm run test -w @team-llm-gateway/api",
