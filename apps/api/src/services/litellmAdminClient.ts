@@ -178,12 +178,48 @@ export class HttpLiteLlmAdminClient implements LiteLlmAdminClient {
       await this.requestJson('/model/new', payload);
     } catch (error) {
       if (error instanceof LiteLlmAdminError && [400, 409].includes(error.statusCode)) {
-        await this.requestJson('/model/update', payload);
+        const modelName = getModelName(payload);
+        const modelIds = await this.getModelIdsByName(modelName);
+        if (!modelIds.length) {
+          throw error;
+        }
+
+        for (const modelId of modelIds) {
+          await this.requestJson('/model/delete', { id: modelId });
+        }
+
+        await this.requestJson('/model/new', payload);
         return;
       }
 
       throw error;
     }
+  }
+
+  private async getModelIdsByName(modelName: string): Promise<string[]> {
+    const body = await this.request('GET', '/model/info');
+    if (!isRecord(body) || !Array.isArray(body.data)) {
+      return [];
+    }
+
+    return body.data
+      .filter((entry) => isRecord(entry) && entry.model_name === modelName)
+      .map((entry) => {
+        if (!isRecord(entry)) {
+          return null;
+        }
+
+        if (typeof entry.model_id === 'string') {
+          return entry.model_id;
+        }
+
+        if (isRecord(entry.model_info) && typeof entry.model_info.id === 'string') {
+          return entry.model_info.id;
+        }
+
+        return null;
+      })
+      .filter((modelId): modelId is string => Boolean(modelId));
   }
 
   private async requestIgnoringConflict(path: string, payload: unknown): Promise<void> {
@@ -224,6 +260,14 @@ export class HttpLiteLlmAdminClient implements LiteLlmAdminClient {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function getModelName(payload: unknown) {
+  if (isRecord(payload) && typeof payload.model_name === 'string') {
+    return payload.model_name;
+  }
+
+  throw new Error('LiteLLM model payload is missing model_name');
 }
 
 export class LiteLlmAdminError extends Error {

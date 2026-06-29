@@ -3,6 +3,7 @@ import {
   buildLiteLlmKeyPayload,
   buildLiteLlmTeamPayload,
   buildLiteLlmUserPayload,
+  HttpLiteLlmAdminClient,
   type LiteLlmCreateVirtualKeyInput,
 } from '../src/services/litellmAdminClient.js';
 
@@ -56,4 +57,65 @@ describe('LiteLLM admin payloads', () => {
       models: ['code-premium', 'code-balanced', 'code-fallback'],
     });
   });
+
+  it('recreates an existing dynamic model when LiteLLM rejects create as duplicate', async () => {
+    const requests: Array<{ url: string; body?: unknown }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url, init) => {
+      requests.push({
+        url: String(url),
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      });
+
+      if (String(url).endsWith('/model/new') && requests.length === 1) {
+        return jsonResponse(400, { error: 'model already exists' });
+      }
+
+      if (String(url).endsWith('/model/info')) {
+        return jsonResponse(200, {
+          data: [
+            {
+              model_name: 'code-premium',
+              model_info: { id: 'existing-model-id' },
+            },
+          ],
+        });
+      }
+
+      return jsonResponse(200, { ok: true });
+    }) as typeof fetch;
+
+    try {
+      const client = new HttpLiteLlmAdminClient({
+        LITELLM_PROXY_URL: 'https://llm.example',
+        LITELLM_MASTER_KEY: 'sk-master',
+      } as never);
+
+      await client.upsertModel({
+        model_name: 'code-premium',
+        litellm_params: {
+          model: 'openai/cx/gpt-5.3-codex-spark',
+          api_base: 'https://router.example/v1',
+          api_key: 'provider-key',
+        },
+      });
+
+      expect(requests.map((request) => request.url)).toEqual([
+        'https://llm.example/model/new',
+        'https://llm.example/model/info',
+        'https://llm.example/model/delete',
+        'https://llm.example/model/new',
+      ]);
+      expect(requests[2].body).toEqual({ id: 'existing-model-id' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
+
+function jsonResponse(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
