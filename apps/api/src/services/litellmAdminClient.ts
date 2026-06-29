@@ -174,25 +174,26 @@ export class HttpLiteLlmAdminClient implements LiteLlmAdminClient {
   }
 
   async upsertModel(payload: unknown): Promise<void> {
+    const modelName = getModelName(payload);
+    await this.deleteModelsByName(modelName);
+
     try {
       await this.requestJson('/model/new', payload);
     } catch (error) {
       if (error instanceof LiteLlmAdminError && [400, 409].includes(error.statusCode)) {
-        const modelName = getModelName(payload);
-        const modelIds = await this.getModelIdsByName(modelName);
-        if (!modelIds.length) {
-          throw error;
-        }
-
-        for (const modelId of modelIds) {
-          await this.requestJson('/model/delete', { id: modelId });
-        }
-
+        await this.deleteModelsByName(modelName);
         await this.requestJson('/model/new', payload);
         return;
       }
 
       throw error;
+    }
+  }
+
+  private async deleteModelsByName(modelName: string): Promise<void> {
+    const modelIds = await this.getModelIdsByName(modelName);
+    for (const modelId of modelIds) {
+      await this.requestJson('/model/delete', { id: modelId });
     }
   }
 

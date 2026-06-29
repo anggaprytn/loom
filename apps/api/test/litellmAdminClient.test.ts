@@ -58,7 +58,7 @@ describe('LiteLLM admin payloads', () => {
     });
   });
 
-  it('recreates an existing dynamic model when LiteLLM rejects create as duplicate', async () => {
+  it('recreates an existing dynamic model before syncing alias changes', async () => {
     const requests: Array<{ url: string; body?: unknown }> = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (url, init) => {
@@ -66,10 +66,6 @@ describe('LiteLLM admin payloads', () => {
         url: String(url),
         body: init?.body ? JSON.parse(String(init.body)) : undefined,
       });
-
-      if (String(url).endsWith('/model/new') && requests.length === 1) {
-        return jsonResponse(400, { error: 'model already exists' });
-      }
 
       if (String(url).endsWith('/model/info')) {
         return jsonResponse(200, {
@@ -101,12 +97,76 @@ describe('LiteLLM admin payloads', () => {
       });
 
       expect(requests.map((request) => request.url)).toEqual([
+        'https://llm.example/model/info',
+        'https://llm.example/model/delete',
+        'https://llm.example/model/new',
+      ]);
+      expect(requests[1].body).toEqual({ id: 'existing-model-id' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('retries create after LiteLLM reports a duplicate during sync', async () => {
+    const requests: Array<{ url: string; body?: unknown }> = [];
+    const originalFetch = globalThis.fetch;
+    let infoCalls = 0;
+    let createCalls = 0;
+
+    globalThis.fetch = (async (url, init) => {
+      requests.push({
+        url: String(url),
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      });
+
+      if (String(url).endsWith('/model/info')) {
+        infoCalls += 1;
+        return jsonResponse(200, {
+          data:
+            infoCalls === 1
+              ? []
+              : [
+                  {
+                    model_name: 'code-premium',
+                    model_info: { id: 'race-model-id' },
+                  },
+                ],
+        });
+      }
+
+      if (String(url).endsWith('/model/new')) {
+        createCalls += 1;
+        if (createCalls === 1) {
+          return jsonResponse(409, { error: 'model already exists' });
+        }
+      }
+
+      return jsonResponse(200, { ok: true });
+    }) as typeof fetch;
+
+    try {
+      const client = new HttpLiteLlmAdminClient({
+        LITELLM_PROXY_URL: 'https://llm.example',
+        LITELLM_MASTER_KEY: 'sk-master',
+      } as never);
+
+      await client.upsertModel({
+        model_name: 'code-premium',
+        litellm_params: {
+          model: 'openai/cx/gpt-5.3-codex-spark',
+          api_base: 'https://router.example/v1',
+          api_key: 'provider-key',
+        },
+      });
+
+      expect(requests.map((request) => request.url)).toEqual([
+        'https://llm.example/model/info',
         'https://llm.example/model/new',
         'https://llm.example/model/info',
         'https://llm.example/model/delete',
         'https://llm.example/model/new',
       ]);
-      expect(requests[2].body).toEqual({ id: 'existing-model-id' });
+      expect(requests[3].body).toEqual({ id: 'race-model-id' });
     } finally {
       globalThis.fetch = originalFetch;
     }
