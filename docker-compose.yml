@@ -38,6 +38,16 @@ services:
       SERVICE_FQDN_ADMIN_3000: ${SERVICE_FQDN_ADMIN_3000:-llm-admin.apps.anggaprytn.com}
     expose:
       - '3000'
+    labels:
+      traefik.enable: 'true'
+      traefik.http.routers.team-llm-admin-http.entryPoints: http
+      traefik.http.routers.team-llm-admin-http.rule: Host(`llm-admin.apps.anggaprytn.com`)
+      traefik.http.routers.team-llm-admin-http.middlewares: redirect-to-https
+      traefik.http.routers.team-llm-admin-https.entryPoints: https
+      traefik.http.routers.team-llm-admin-https.rule: Host(`llm-admin.apps.anggaprytn.com`)
+      traefik.http.routers.team-llm-admin-https.tls: 'true'
+      traefik.http.routers.team-llm-admin-https.middlewares: gzip
+      traefik.http.services.team-llm-admin.loadbalancer.server.port: '3000'
     depends_on:
       postgres:
         condition: service_started
@@ -62,6 +72,16 @@ services:
     command: ['--config', '/app/config.yaml', '--port', '4000']
     expose:
       - '4000'
+    labels:
+      traefik.enable: 'true'
+      traefik.http.routers.team-llm-gateway-http.entryPoints: http
+      traefik.http.routers.team-llm-gateway-http.rule: Host(`llm.apps.anggaprytn.com`)
+      traefik.http.routers.team-llm-gateway-http.middlewares: redirect-to-https
+      traefik.http.routers.team-llm-gateway-https.entryPoints: https
+      traefik.http.routers.team-llm-gateway-https.rule: Host(`llm.apps.anggaprytn.com`)
+      traefik.http.routers.team-llm-gateway-https.tls: 'true'
+      traefik.http.routers.team-llm-gateway-https.middlewares: gzip
+      traefik.http.services.team-llm-gateway.loadbalancer.server.port: '4000'
     depends_on:
       postgres:
         condition: service_started
