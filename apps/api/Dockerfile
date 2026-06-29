@@ -10,7 +10,7 @@ WORKDIR /app
 ENV NODE_ENV=development
 COPY . .
 RUN npx prisma generate --schema prisma/schema.prisma
-RUN npm run build
+RUN npm run build -w @team-llm-gateway/api
 
 FROM node:24-alpine AS runtime
 WORKDIR /app
