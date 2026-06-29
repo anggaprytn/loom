@@ -84,15 +84,6 @@ export type DashboardResult = {
   errors: Partial<Record<SectionKey, string>>;
 };
 
-export type ChatTestResult = {
-  ok: boolean;
-  model: string;
-  content: string;
-  latencyMs: number;
-  usage?: unknown;
-  raw?: unknown;
-};
-
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -199,9 +190,4 @@ export const api = {
     request<ModelAlias>(token, `/model-aliases/${id}`, { method: 'DELETE' }),
   revokeKey: (token: string, id: string) =>
     request<ApiKey>(token, `/keys/${id}/revoke`, { method: 'POST' }),
-  chatTest: (token: string, payload: { model: string; message: string }) =>
-    request<ChatTestResult>(token, '/chat-test', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
 };

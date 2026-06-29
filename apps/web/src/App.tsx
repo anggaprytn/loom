@@ -1,8 +1,6 @@
 import {
-  Activity,
   AlertTriangle,
   BarChart3,
-  CheckCircle2,
   Copy,
   KeyRound,
   LayoutDashboard,
@@ -12,18 +10,14 @@ import {
   Search,
   Server,
   Settings,
-  ShieldAlert,
-  Shuffle,
   Unlock,
   UserPlus,
-  Users,
   X,
 } from 'lucide-react';
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import {
   api,
   ApiKey,
-  ChatTestResult,
   DashboardData,
   ModelAlias,
   Provider,
@@ -33,7 +27,7 @@ import {
   User,
 } from './api';
 
-type Tab = 'overview' | 'keys' | 'providers' | 'aliases' | 'usage' | 'test' | 'settings';
+type Tab = 'overview' | 'keys' | 'providers' | 'aliases' | 'usage' | 'settings';
 type Tone = 'ok' | 'warn' | 'danger' | 'info' | 'off';
 type SortDir = 'asc' | 'desc';
 type SortState = { key: string; dir: SortDir };
@@ -85,12 +79,6 @@ const nav: Array<{ id: Tab; label: string; description: string; icon: ReactNode 
     label: 'Usage',
     description: 'Monitor request volume, token usage, cost, and attribution.',
     icon: <BarChart3 />,
-  },
-  {
-    id: 'test',
-    label: 'Chat Test',
-    description: 'Run a controlled LiteLLM smoke test against a model alias.',
-    icon: <Activity />,
   },
   {
     id: 'settings',
@@ -253,9 +241,6 @@ export function App() {
             <Aliases data={data} errors={errors} token={token} run={run} setModal={setModal} />
           )}
           {tab === 'usage' && <Usage data={data} errors={errors} token={token} notify={notify} />}
-          {tab === 'test' && (
-            <ChatTest data={data} token={token} notify={notify} addActivity={addActivity} />
-          )}
           {tab === 'settings' && <SettingsView clearSession={clearSession} notify={notify} />}
         </main>
       </div>
@@ -1086,109 +1071,6 @@ function Usage({
         </div>
       </Panel>
     </>
-  );
-}
-
-function ChatTest({
-  data,
-  token,
-  notify,
-  addActivity,
-}: {
-  data: DashboardData;
-  token: string;
-  notify: (message: string, tone?: Tone) => void;
-  addActivity: (label: string, tone?: Tone) => void;
-}) {
-  const [model, setModel] = useState('');
-  const [message, setMessage] = useState('Say ok and identify the route you used.');
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<ChatTestResult | null>(null);
-  const enabledAliases = data.aliases.filter((alias) => alias.enabled);
-
-  useEffect(() => {
-    if (!model && enabledAliases[0]) setModel(enabledAliases[0].alias);
-  }, [enabledAliases, model]);
-
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!token.trim()) return notify('Enter the admin token before running chat test.', 'warn');
-    if (!model || !message.trim()) return notify('Model alias and message are required.', 'warn');
-    setLoading(true);
-    setResult(null);
-    try {
-      const response = await api.chatTest(token, { model, message: message.trim() });
-      setResult(response);
-      notify('Chat test completed.');
-      addActivity(`Chat test succeeded for ${model} in ${response.latencyMs}ms`, 'ok');
-    } catch (error) {
-      notify(error instanceof Error ? error.message : 'Chat test failed.', 'danger');
-      addActivity(`Chat test failed for ${model}`, 'danger');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="grid two">
-      <Panel
-        title="Chat Test"
-        subtitle="Runs an admin-only LiteLLM smoke test against a selected model alias."
-      >
-        <form className="form-grid" onSubmit={submit}>
-          <label className="field full">
-            <span>Model alias *</span>
-            <select value={model} onChange={(event) => setModel(event.target.value)} required>
-              <option value="">
-                {enabledAliases.length ? 'Select alias' : 'Create an enabled alias first'}
-              </option>
-              {enabledAliases.map((alias) => (
-                <option key={alias.id} value={alias.alias}>
-                  {alias.alias} · {alias.provider?.slug || 'unknown provider'}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field full">
-            <span>Message *</span>
-            <textarea
-              value={message}
-              onChange={(event) => setMessage(event.target.value)}
-              maxLength={4000}
-            />
-          </label>
-          <div className="actions full">
-            <Button
-              tone="primary"
-              icon={<Shuffle />}
-              type="submit"
-              disabled={loading || !enabledAliases.length}
-            >
-              {loading ? 'Testing' : 'Run Chat Test'}
-            </Button>
-          </div>
-        </form>
-      </Panel>
-      <Panel
-        title="Result"
-        subtitle="Response summary from the OpenAI-compatible chat completion call."
-      >
-        {result ? (
-          <div className="result">
-            <StatusLine label="Model" value={result.model} tone="ok" />
-            <StatusLine label="Latency" value={`${result.latencyMs}ms`} tone="info" />
-            <div className="callout info">{result.content || 'No assistant content returned.'}</div>
-            {result.usage ? (
-              <pre className="raw-json">{JSON.stringify(result.usage, null, 2)}</pre>
-            ) : null}
-          </div>
-        ) : (
-          <div className="empty">
-            Run a chat test to verify the selected alias routes through LiteLLM.
-          </div>
-        )}
-      </Panel>
-    </div>
   );
 }
 

@@ -117,11 +117,6 @@ const updateModelAliasSchema = z.object({
   syncToLiteLlm: z.boolean().default(true),
 });
 
-const chatTestSchema = z.object({
-  model: z.string().min(1),
-  message: z.string().min(1).max(4000),
-});
-
 export async function adminRoutes(
   app: FastifyInstance,
   prisma: PrismaLike,
@@ -670,44 +665,6 @@ export async function adminRoutes(
     };
   });
 
-  app.post('/chat-test', async (request, reply) => {
-    const input = chatTestSchema.parse(request.body);
-    const startedAt = Date.now();
-    const response = await fetch(
-      `${env.LITELLM_PROXY_URL.replace(/\/$/, '')}/v1/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${env.LITELLM_MASTER_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: input.model,
-          messages: [{ role: 'user', content: input.message }],
-        }),
-      },
-    );
-    const text = await response.text();
-    const body = text ? safeJsonParse(text) : {};
-
-    if (!response.ok) {
-      return reply.code(response.status).send({
-        error: 'chat_test_failed',
-        details: body,
-        latencyMs: Date.now() - startedAt,
-      });
-    }
-
-    return reply.send({
-      ok: true,
-      model: pickChatModel(body) ?? input.model,
-      content: pickChatContent(body),
-      usage: isRecord(body) ? body.usage : undefined,
-      latencyMs: Date.now() - startedAt,
-      raw: body,
-    });
-  });
-
   app.get('/budgets/check/:userId', async (request) => {
     const params = z.object({ userId: z.string().min(1) }).parse(request.params);
     const { start, end } = monthWindow();
@@ -997,38 +954,4 @@ function dailyLiteLlmRollup(records: Awaited<ReturnType<typeof getLiteLlmUsage>>
 
 function decimalToString(value: Prisma.Decimal | null | undefined): string {
   return value == null ? '0.00000000' : value.toFixed(8);
-}
-
-function pickChatModel(body: unknown): string | null {
-  return isRecord(body) && typeof body.model === 'string' ? body.model : null;
-}
-
-function pickChatContent(body: unknown): string {
-  if (!isRecord(body) || !Array.isArray(body.choices)) {
-    return '';
-  }
-
-  const [choice] = body.choices;
-  if (!isRecord(choice)) {
-    return '';
-  }
-
-  const message = choice.message;
-  if (isRecord(message) && typeof message.content === 'string') {
-    return message.content;
-  }
-
-  return typeof choice.text === 'string' ? choice.text : '';
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function safeJsonParse(text: string): unknown {
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return { message: text };
-  }
 }
