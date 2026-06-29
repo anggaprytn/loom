@@ -12,6 +12,17 @@ import {
   normalizeLiteLlmSpendLog,
 } from '../services/litellmUsageService.js';
 import { normalizeAllowedModels } from '../services/modelPolicy.js';
+import {
+  buildLiteLlmModelPayload,
+  checkOpenAiCompatibleProvider,
+  renderLiteLlmModelConfig,
+  type ProviderModelTarget,
+} from '../services/providerRegistry.js';
+import {
+  decryptProviderSecret,
+  encryptProviderSecret,
+  secretLast4,
+} from '../services/providerSecrets.js';
 import { hashApiKey, keyPrefix } from '../utils/apiKey.js';
 
 const createUserSchema = z.object({
@@ -48,6 +59,30 @@ const createBudgetSchema = z.object({
   teamId: z.string().min(1).optional(),
   monthlyTokenLimit: z.number().int().positive().optional(),
   monthlyCostLimit: z.number().positive().optional(),
+});
+
+const createProviderSchema = z.object({
+  slug: z
+    .string()
+    .min(1)
+    .regex(/^[a-z0-9][a-z0-9-]*$/),
+  name: z.string().min(1),
+  baseUrl: z.string().url(),
+  authType: z.enum(['api_key', 'none']).default('api_key'),
+  apiKey: z.string().min(1).optional(),
+  enabled: z.boolean().default(true),
+});
+
+const createModelAliasSchema = z.object({
+  alias: z
+    .string()
+    .min(1)
+    .regex(/^[a-z0-9][a-z0-9-]*$/),
+  providerId: z.string().min(1),
+  upstreamModel: z.string().min(1),
+  description: z.string().min(1).optional(),
+  enabled: z.boolean().default(true),
+  syncToLiteLlm: z.boolean().default(true),
 });
 
 export async function adminRoutes(
@@ -318,6 +353,145 @@ export async function adminRoutes(
     }));
   });
 
+  app.post('/providers', async (request, reply) => {
+    const input = createProviderSchema.parse(request.body);
+
+    if (input.authType === 'api_key' && !input.apiKey) {
+      return reply.code(400).send({ error: 'apiKey is required for api_key providers' });
+    }
+
+    const provider = await prisma.provider.create({
+      data: {
+        slug: input.slug,
+        name: input.name,
+        baseUrl: input.baseUrl.replace(/\/$/, ''),
+        authType: input.authType,
+        encryptedApiKey: input.apiKey
+          ? encryptProviderSecret(input.apiKey, env.PROVIDER_SECRET_KEY)
+          : undefined,
+        apiKeyLast4: input.apiKey ? secretLast4(input.apiKey) : undefined,
+        enabled: input.enabled,
+      },
+      select: providerSelect(),
+    });
+
+    return reply.code(201).send(provider);
+  });
+
+  app.get('/providers', async () =>
+    prisma.provider.findMany({
+      select: providerSelect(),
+      orderBy: { createdAt: 'desc' },
+    }),
+  );
+
+  app.get('/providers/:id/health', async (request, reply) => {
+    const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    const provider = await prisma.provider.findUnique({ where: { id: params.id } });
+
+    if (!provider) {
+      return reply.code(404).send({ error: 'provider_not_found' });
+    }
+
+    const apiKey = provider.encryptedApiKey
+      ? decryptProviderSecret(provider.encryptedApiKey, env.PROVIDER_SECRET_KEY)
+      : undefined;
+    const health = await checkOpenAiCompatibleProvider({
+      baseUrl: provider.baseUrl,
+      apiKey,
+    });
+    const healthStatus = health.ok ? 'healthy' : 'unhealthy';
+
+    await prisma.provider.update({
+      where: { id: provider.id },
+      data: { healthStatus, lastHealthAt: new Date() },
+    });
+
+    return reply
+      .code(health.ok ? 200 : 502)
+      .send({ providerId: provider.id, healthStatus, health });
+  });
+
+  app.post('/model-aliases', async (request, reply) => {
+    const input = createModelAliasSchema.parse(request.body);
+    const provider = await prisma.provider.findUnique({ where: { id: input.providerId } });
+
+    if (!provider) {
+      return reply.code(404).send({ error: 'provider_not_found' });
+    }
+
+    const alias = await prisma.modelAlias.create({
+      data: {
+        alias: input.alias,
+        providerId: provider.id,
+        upstreamModel: input.upstreamModel,
+        description: input.description,
+        enabled: input.enabled,
+      },
+      include: { provider: true },
+    });
+
+    if (input.syncToLiteLlm && alias.enabled && provider.enabled) {
+      const target = aliasToTarget(alias, env.PROVIDER_SECRET_KEY);
+      await litellmAdmin.upsertModel(buildLiteLlmModelPayload(target));
+    }
+
+    return reply.code(201).send(formatModelAlias(alias));
+  });
+
+  app.get('/model-aliases', async () => {
+    const aliases = await prisma.modelAlias.findMany({
+      include: { provider: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return aliases.map(formatModelAlias);
+  });
+
+  app.post('/model-aliases/:id/sync', async (request, reply) => {
+    const params = z.object({ id: z.string().min(1) }).parse(request.params);
+    const alias = await prisma.modelAlias.findUnique({
+      where: { id: params.id },
+      include: { provider: true },
+    });
+
+    if (!alias) {
+      return reply.code(404).send({ error: 'model_alias_not_found' });
+    }
+
+    if (!alias.enabled || !alias.provider.enabled) {
+      return reply.code(400).send({ error: 'model_alias_or_provider_disabled' });
+    }
+
+    const target = aliasToTarget(alias, env.PROVIDER_SECRET_KEY);
+    await litellmAdmin.upsertModel(buildLiteLlmModelPayload(target));
+
+    return reply.send({ id: alias.id, alias: alias.alias, synced: true });
+  });
+
+  app.get('/litellm/model-config', async () => {
+    const aliases = await prisma.modelAlias.findMany({
+      where: { enabled: true, provider: { enabled: true } },
+      include: { provider: true },
+      orderBy: { alias: 'asc' },
+    });
+
+    return {
+      source: 'control-plane-db',
+      yaml: renderLiteLlmModelConfig(
+        aliases.map((alias) => ({
+          alias: alias.alias,
+          providerSlug: alias.provider.slug,
+          providerBaseUrl: alias.provider.baseUrl,
+          providerAuthType: alias.provider.authType,
+          upstreamModel: alias.upstreamModel,
+          apiKey: alias.provider.apiKeyLast4 ? '<redacted>' : null,
+          description: alias.description,
+        })),
+      ),
+    };
+  });
+
   app.get('/budgets/check/:userId', async (request) => {
     const params = z.object({ userId: z.string().min(1) }).parse(request.params);
     const { start, end } = monthWindow();
@@ -346,6 +520,87 @@ export async function adminRoutes(
       },
     };
   });
+}
+
+function providerSelect() {
+  return {
+    id: true,
+    slug: true,
+    name: true,
+    baseUrl: true,
+    authType: true,
+    apiKeyLast4: true,
+    enabled: true,
+    healthStatus: true,
+    lastHealthAt: true,
+    createdAt: true,
+    updatedAt: true,
+  } as const;
+}
+
+function aliasToTarget(
+  alias: {
+    alias: string;
+    upstreamModel: string;
+    description: string | null;
+    provider: {
+      slug: string;
+      baseUrl: string;
+      authType: 'api_key' | 'none';
+      encryptedApiKey: string | null;
+    };
+  },
+  providerSecretKey: string,
+): ProviderModelTarget {
+  return {
+    alias: alias.alias,
+    providerSlug: alias.provider.slug,
+    providerBaseUrl: alias.provider.baseUrl,
+    providerAuthType: alias.provider.authType,
+    upstreamModel: alias.upstreamModel,
+    apiKey: alias.provider.encryptedApiKey
+      ? decryptProviderSecret(alias.provider.encryptedApiKey, providerSecretKey)
+      : null,
+    description: alias.description,
+  };
+}
+
+function formatModelAlias(alias: {
+  id: string;
+  alias: string;
+  upstreamModel: string;
+  enabled: boolean;
+  description: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  provider: {
+    id: string;
+    slug: string;
+    name: string;
+    baseUrl: string;
+    authType: 'api_key' | 'none';
+    apiKeyLast4: string | null;
+    enabled: boolean;
+  };
+}) {
+  return {
+    id: alias.id,
+    alias: alias.alias,
+    upstreamModel: alias.upstreamModel,
+    enabled: alias.enabled,
+    description: alias.description,
+    createdAt: alias.createdAt,
+    updatedAt: alias.updatedAt,
+    provider: {
+      id: alias.provider.id,
+      slug: alias.provider.slug,
+      name: alias.provider.name,
+      baseUrl: alias.provider.baseUrl,
+      authType: alias.provider.authType,
+      apiKeyLast4: alias.provider.apiKeyLast4,
+      enabled: alias.provider.enabled,
+    },
+  };
 }
 
 function usageWhere(query: { from?: string; to?: string }) {

@@ -17,6 +17,7 @@ const envSchema = z.object({
   DIRECT_URL: z.string().url().optional(),
   ADMIN_TOKEN: z.string().min(16),
   API_KEY_PEPPER: z.string().min(16),
+  PROVIDER_SECRET_KEY: z.string().min(32),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   REDIS_URL: z.string().url().optional(),
   LITELLM_PROXY_URL: z.string().url(),

@@ -2,7 +2,7 @@
 
 ## Hard Boundaries
 
-This project must not implement credential scraping, quota bypassing, password sharing automation, or storage of user passwords. Upstream provider credentials must be operator-provided through environment variables and used only for authorized provider accounts.
+This project must not implement credential scraping, quota bypassing, password sharing automation, browser cookie reuse, or storage of user passwords. Upstream provider credentials must be operator-provided through environment variables or the encrypted provider registry and used only for authorized provider accounts.
 
 ## Threat Model
 
@@ -23,7 +23,8 @@ Impact: runaway upstream bill or account compromise.
 
 Controls:
 
-- Keep upstream credentials in env/secret manager only.
+- Keep static upstream credentials in env/secret manager.
+- For registry-managed providers, encrypt API keys at rest with `PROVIDER_SECRET_KEY` and return only `apiKeyLast4`.
 - Do not expose 9router publicly.
 - Rotate `ROUTER_API_KEY` after suspected compromise.
 
@@ -64,10 +65,11 @@ Impact: wrong model, higher cost, or unavailable route.
 
 Controls:
 
-- Keep aliases in `litellm_config.yaml`.
-- Review changes before deploy.
+- Keep bootstrap aliases in `litellm_config.yaml`.
+- Manage dynamic aliases through `/admin/model-aliases` and sync to LiteLLM.
+- Review `GET /admin/litellm/model-config` before changes.
 - Smoke test `/v1/models` and one completion after changes.
 
 ## Provider Account Policy
 
-Personal ChatGPT Pro pooling is not production-supported. Upstream provider credentials must belong to authorized company/team/provider-approved accounts and must be supplied through environment variables or a deployment secret manager. Full prompt/response logging remains off by default.
+Personal ChatGPT Pro/Gemini browser-session pooling is not production-supported. Upstream provider credentials must belong to authorized company/team/provider-approved accounts and must be supplied through environment variables, a deployment secret manager, or the encrypted provider registry. Full prompt/response logging remains off by default.

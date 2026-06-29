@@ -24,6 +24,11 @@ enum BudgetPeriod {
   monthly
 }
 
+enum ProviderAuthType {
+  api_key
+  none
+}
+
 model User {
   id          String        @id @default(cuid())
   email       String        @unique
@@ -117,4 +122,37 @@ model BudgetLimit {
   @@index([userId])
   @@index([teamId])
   @@index([active])
+}
+
+model Provider {
+  id              String           @id @default(cuid())
+  slug            String           @unique
+  name            String
+  baseUrl         String
+  authType        ProviderAuthType @default(api_key)
+  encryptedApiKey String?
+  apiKeyLast4     String?
+  enabled         Boolean          @default(true)
+  healthStatus    String?
+  lastHealthAt    DateTime?
+  aliases         ModelAlias[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([enabled])
+}
+
+model ModelAlias {
+  id            String    @id @default(cuid())
+  alias         String    @unique
+  providerId    String
+  provider      Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  upstreamModel String
+  enabled       Boolean   @default(true)
+  description   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([providerId])
+  @@index([enabled])
 }

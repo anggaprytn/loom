@@ -34,4 +34,4 @@ export TEAM_LLM_GATEWAY_API_KEY=sk_PERSONAL_LITELLM_KEY
 - `agent-cheap`: low-cost agent route.
 - `codex-default` and `codex-premium`: backward-compatible aliases.
 
-These aliases are stable front-door names. Operators can repoint them in `litellm_config.yaml` without changing developer configs.
+These aliases are stable front-door names. Operators can repoint them through the provider registry and `/admin/model-aliases` without changing developer configs. The upstream may be local 9Router, `ai.company.com`, OpenAI, Gemini through an OpenAI-compatible proxy, or a local model server. Codex still talks only to LiteLLM.

@@ -1,8 +1,8 @@
 # team-llm-gateway
 
-Internal LLM gateway for a small engineering team. LiteLLM is the OpenAI-compatible public proxy and request-time authority. 9router or another OpenAI-compatible provider is the private upstream. The control plane manages users, creates LiteLLM virtual keys, stores local metadata, and summarizes usage.
+Internal LLM gateway for a small engineering team. LiteLLM is the OpenAI-compatible public proxy and request-time authority. 9router, `ai.company.com`, OpenAI, Gemini proxies, or another OpenAI-compatible provider can sit behind it. The control plane manages users, creates LiteLLM virtual keys, stores local metadata, manages provider/model aliases, and summarizes usage.
 
-This repo intentionally does not scrape credentials, store user passwords, automate password sharing, or bypass provider quotas. Upstream credentials are operator-provided through environment variables only.
+This repo intentionally does not scrape credentials, store user passwords, automate password sharing, or bypass provider quotas. Upstream credentials are operator-provided through environment variables or the admin provider registry. Browser sessions/cookies are not accepted as provider credentials.
 
 ## Local Setup
 
@@ -76,6 +76,35 @@ curl -s http://localhost:3000/admin/usage/by-model -H "Authorization: Bearer $AD
 
 For local/manual usage records, add `?source=local`.
 
+Create an OpenAI-compatible upstream provider:
+
+```bash
+curl -s http://localhost:3000/admin/providers \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"slug":"company-ai","name":"Company AI","baseUrl":"https://ai.company.com/v1","apiKey":"PROVIDER_API_KEY"}'
+```
+
+For local 9Router, use the private service URL:
+
+```bash
+curl -s http://localhost:3000/admin/providers \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"slug":"9router","name":"9Router Local","baseUrl":"http://9router:20128/v1","apiKey":"LOCAL_9ROUTER_TOKEN"}'
+```
+
+Create and sync a model alias to LiteLLM:
+
+```bash
+curl -s http://localhost:3000/admin/model-aliases \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"alias":"code-premium","providerId":"PROVIDER_ID","upstreamModel":"openai/gemini-2.5-pro"}'
+```
+
+Provider API keys stored through the registry are encrypted at rest with `PROVIDER_SECRET_KEY`. List responses only return `apiKeyLast4`.
+
 Call LiteLLM with the returned virtual key:
 
 ```bash
@@ -87,7 +116,7 @@ curl http://localhost:4000/v1/chat/completions \
 
 ## Boundary
 
-LiteLLM virtual keys are the real user keys. The control plane does not mint independent fake proxy keys. It calls LiteLLM admin APIs to create/revoke keys, then stores hashed local metadata for UX/reference. LiteLLM handles request-time auth, model allowlists, budgets supported by LiteLLM, and spend tracking.
+LiteLLM virtual keys are the real user keys. The control plane does not mint independent fake proxy keys. It calls LiteLLM admin APIs to create/revoke keys, then stores hashed local metadata for UX/reference. LiteLLM handles request-time auth, model allowlists, budgets supported by LiteLLM, and spend tracking. Provider registry aliases are synced into LiteLLM through LiteLLM admin model APIs; static `litellm_config.yaml` aliases remain as bootstrapping defaults.
 
 ## Codex Configuration
 

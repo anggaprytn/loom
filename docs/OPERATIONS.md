@@ -19,9 +19,42 @@ Postgres initializes separate schemas: `app` for the control plane and `litellm`
 
 ## Rotate Upstream Provider Key
 
+For static env providers:
+
 1. Replace `ROUTER_API_KEY` in the operator-managed environment.
 2. Restart LiteLLM.
 3. Run a small `/v1/models` or chat completion smoke test.
+
+For registry-managed providers, create a replacement provider entry or update through a future edit endpoint, then resync affected aliases with `POST /admin/model-aliases/:id/sync`. The MVP intentionally avoids returning stored provider API keys.
+
+## Add Provider and Alias
+
+Use the provider registry for OpenAI-compatible targets such as local 9Router, `https://ai.company.com/v1`, OpenAI, or an internal vLLM/Ollama proxy:
+
+```bash
+curl -s http://localhost:3000/admin/providers \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"slug":"9router","name":"9Router Local","baseUrl":"http://9router:20128/v1","apiKey":"LOCAL_TOKEN"}'
+```
+
+Check provider health:
+
+```bash
+curl -s http://localhost:3000/admin/providers/PROVIDER_ID/health \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+Create a public alias and sync it to LiteLLM:
+
+```bash
+curl -s http://localhost:3000/admin/model-aliases \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"alias":"code-premium","providerId":"PROVIDER_ID","upstreamModel":"openai/gemini-2.5-pro"}'
+```
+
+Developers keep using `code-premium` regardless of whether it points to 9Router, `ai.company.com`, or another OpenAI-compatible backend.
 
 ## Revoke a Team Key
 

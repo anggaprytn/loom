@@ -31,6 +31,7 @@ export interface LiteLlmAdminClient {
   createVirtualKey(input: LiteLlmCreateVirtualKeyInput): Promise<LiteLlmVirtualKey>;
   revokeVirtualKey(alias: string): Promise<void>;
   getSpendLogs(query: LiteLlmSpendLogQuery): Promise<unknown[]>;
+  upsertModel(payload: unknown): Promise<void>;
 }
 
 export type LiteLlmSpendLogQuery = {
@@ -170,6 +171,19 @@ export class HttpLiteLlmAdminClient implements LiteLlmAdminClient {
     }
 
     return [];
+  }
+
+  async upsertModel(payload: unknown): Promise<void> {
+    try {
+      await this.requestJson('/model/new', payload);
+    } catch (error) {
+      if (error instanceof LiteLlmAdminError && [400, 409].includes(error.statusCode)) {
+        await this.requestJson('/model/update', payload);
+        return;
+      }
+
+      throw error;
+    }
   }
 
   private async requestIgnoringConflict(path: string, payload: unknown): Promise<void> {

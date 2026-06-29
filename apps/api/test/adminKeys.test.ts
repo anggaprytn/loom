@@ -15,6 +15,7 @@ const env: Env = {
   DATABASE_URL: 'postgresql://user:pass@localhost:5432/db',
   ADMIN_TOKEN: '1234567890123456',
   API_KEY_PEPPER: '1234567890123456',
+  PROVIDER_SECRET_KEY: '12345678901234567890123456789012',
   LOG_LEVEL: 'silent',
   LITELLM_PROXY_URL: 'http://localhost:4000',
   LITELLM_MASTER_KEY: 'sk-1234567890123456',
@@ -151,6 +152,8 @@ class MockLiteLlmAdminClient implements LiteLlmAdminClient {
   async getSpendLogs(_query: LiteLlmSpendLogQuery): Promise<unknown[]> {
     return this.spendLogs;
   }
+
+  async upsertModel(_payload: unknown): Promise<void> {}
 }
 
 function createMockPrisma(options: { failCreate?: boolean } = {}) {

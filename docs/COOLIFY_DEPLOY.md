@@ -17,6 +17,7 @@ Control plane:
 - `LITELLM_DATABASE_URL`
 - `ADMIN_TOKEN`
 - `API_KEY_PEPPER`
+- `PROVIDER_SECRET_KEY`
 - `LITELLM_PROXY_URL`
 - `LITELLM_MASTER_KEY`
 - `ROUTER_BASE_URL` or legacy `NINE_ROUTER_BASE_URL`
@@ -29,6 +30,8 @@ Control plane:
 - `ROUTER_AGENT_CHEAP_MODEL`
 
 Set model values as LiteLLM model strings, for example `openai/<9router-model-id>`, because the router is exposed to LiteLLM as an OpenAI-compatible backend.
+
+`ROUTER_*` values are bootstrapping defaults. Phase 3 provider registry entries can add or repoint model aliases at runtime through the admin API and LiteLLM model APIs.
 
 LiteLLM:
 
@@ -67,11 +70,11 @@ Route developer traffic to LiteLLM only:
 https://ai.company.internal/v1 -> litellm:4000/v1
 ```
 
-Do not proxy 9Router publicly. If the admin API is exposed, put it behind VPN/auth and keep `ADMIN_TOKEN` long and rotated.
+Do not proxy 9Router publicly. If the admin API is exposed, put it behind VPN/auth and keep `ADMIN_TOKEN` long and rotated. Dynamic provider API keys stored through the admin API are encrypted with `PROVIDER_SECRET_KEY`, so keep that secret stable across restarts and backups.
 
 ## Production Notes
 
 - Store secrets in Coolify environment/secrets, not in git.
-- Rotate `ROUTER_API_KEY` and `LITELLM_MASTER_KEY` after suspected compromise.
+- Rotate `ROUTER_API_KEY`, registry provider API keys, and `LITELLM_MASTER_KEY` after suspected compromise.
 - Keep prompt/response logging disabled unless reviewed and approved.
 - Run `npm run smoke:gateway` after deployment with a temporary user/key.
