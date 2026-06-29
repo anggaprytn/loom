@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum ApiKeyStatus {
+  active
+  revoked
+}
+
+enum UsageStatus {
+  success
+  error
+  rate_limited
+  budget_exceeded
+}
+
+enum BudgetPeriod {
+  monthly
+}
+
+model User {
+  id          String        @id @default(cuid())
+  email       String        @unique
+  name        String
+  role        String        @default("developer")
+  teamId      String?
+  team        Team?         @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  keys        ApiKey[]
+  usage       UsageRecord[]
+  budgets     BudgetLimit[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+}
+
+model Team {
+  id        String        @id @default(cuid())
+  slug      String        @unique
+  name      String
+  users     User[]
+  keys      ApiKey[]
+  usage     UsageRecord[]
+  budgets   BudgetLimit[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+model ApiKey {
+  id           String         @id @default(cuid())
+  prefix       String
+  keyHash      String         @unique
+  name         String
+  status       ApiKeyStatus   @default(active)
+  userId       String
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamId       String?
+  team         Team?          @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  lastUsedAt   DateTime?
+  revokedAt    DateTime?
+  usage        UsageRecord[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([prefix])
+  @@index([userId])
+  @@index([teamId])
+  @@index([status])
+}
+
+model UsageRecord {
+  id               String      @id @default(cuid())
+  timestamp        DateTime    @default(now())
+  userId           String
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  keyId            String?
+  apiKey           ApiKey?     @relation(fields: [keyId], references: [id], onDelete: SetNull)
+  teamId           String?
+  team             Team?       @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  model            String
+  provider         String
+  promptTokens     Int
+  completionTokens Int
+  totalTokens      Int
+  estimatedCost    Decimal     @db.Decimal(18, 8)
+  status           UsageStatus
+  latencyMs        Int?
+  createdAt        DateTime    @default(now())
+
+  @@index([timestamp])
+  @@index([userId, timestamp])
+  @@index([teamId, timestamp])
+  @@index([model, timestamp])
+  @@index([keyId, timestamp])
+}
+
+model BudgetLimit {
+  id                 String       @id @default(cuid())
+  userId             String?
+  user               User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamId             String?
+  team               Team?        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  period             BudgetPeriod @default(monthly)
+  monthlyTokenLimit  Int?
+  monthlyCostLimit   Decimal?     @db.Decimal(18, 8)
+  active             Boolean      @default(true)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@index([userId])
+  @@index([teamId])
+  @@index([active])
+}

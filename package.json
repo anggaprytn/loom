@@ -1,0 +1,28 @@
+{
+  "name": "team-llm-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted internal LLM gateway control plane for LiteLLM and OpenAI-compatible upstreams.",
+  "type": "module",
+  "workspaces": [
+    "apps/api"
+  ],
+  "scripts": {
+    "build": "npm run build -w @team-llm-gateway/api",
+    "dev": "npm run dev -w @team-llm-gateway/api",
+    "lint": "npm run lint -w @team-llm-gateway/api",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "npm run test -w @team-llm-gateway/api",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev --schema prisma/schema.prisma",
+    "docker:up": "docker compose up --build"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "prisma": "^6.19.3"
+  }
+}

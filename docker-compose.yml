@@ -1,0 +1,60 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tlg
+      POSTGRES_PASSWORD: tlg
+      POSTGRES_DB: team_llm_gateway
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U tlg -d team_llm_gateway']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://tlg:tlg@postgres:5432/team_llm_gateway?schema=public
+      DIRECT_URL: postgresql://tlg:tlg@postgres:5432/team_llm_gateway?schema=public
+      REDIS_URL: redis://redis:6379
+    ports:
+      - '3000:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: sh -c "npx prisma migrate deploy --schema prisma/schema.prisma && node apps/api/dist/server.js"
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    env_file:
+      - .env
+    command: ['--config', '/app/config.yaml', '--port', '4000']
+    volumes:
+      - ./litellm_config.yaml:/app/config.yaml:ro
+    ports:
+      - '4000:4000'
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
