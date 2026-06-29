@@ -73,6 +73,15 @@ https://llm.apps.anggaprytn.com/v1 -> litellm:4000/v1
 https://llm-admin.apps.anggaprytn.com -> api:3000
 ```
 
+For Docker Compose apps in Coolify, the internal port must be part of the service FQDN mapping. This Compose file sets:
+
+```text
+SERVICE_FQDN_API_3000=https://llm-admin.apps.anggaprytn.com
+SERVICE_FQDN_LITELLM_4000=https://llm.apps.anggaprytn.com
+```
+
+If configuring domains in the UI manually, attach `llm-admin.apps.anggaprytn.com` to service `api` port `3000`, and `llm.apps.anggaprytn.com` to service `litellm` port `4000`.
+
 Do not proxy 9Router publicly. If the admin API or `/dashboard` is exposed, put it behind VPN/auth and keep `ADMIN_TOKEN` long and rotated. Dynamic provider API keys stored through the admin API are encrypted with `PROVIDER_SECRET_KEY`, so keep that secret stable across restarts and backups.
 
 ## Production Notes
