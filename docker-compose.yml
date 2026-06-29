@@ -7,9 +7,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-team_llm_gateway}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -p 5432']
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -p 5432 -U "$${POSTGRES_USER}"']
       interval: 5s
       timeout: 5s
       retries: 30
@@ -49,7 +48,9 @@ services:
       && node apps/api/dist/server.js"
 
   litellm:
-    image: ghcr.io/berriai/litellm:main-latest
+    build:
+      context: .
+      dockerfile: apps/litellm/Dockerfile
     env_file:
       - .env
     environment:
@@ -57,8 +58,6 @@ services:
       ROUTER_BASE_URL: ${ROUTER_BASE_URL:-${NINE_ROUTER_BASE_URL:-http://9router:20128/v1}}
       ROUTER_API_KEY: ${ROUTER_API_KEY:-${NINE_ROUTER_API_KEY:-}}
     command: ['--config', '/app/config.yaml', '--port', '4000']
-    volumes:
-      - ./litellm_config.yaml:/app/config.yaml:ro
     expose:
       - '4000'
     depends_on:

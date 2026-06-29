@@ -54,8 +54,8 @@ No service should publish host ports in production. Let Coolify route domains to
 ## Volumes
 
 - Postgres data volume is required.
-- Initialize or pre-create `app` and `litellm` schemas. The included Compose stack mounts `docker/postgres/init/001-schemas.sql` for fresh volumes.
-- LiteLLM config is mounted read-only from `litellm_config.yaml`.
+- App migrations create the `app` schema. LiteLLM manages its own database tables on startup.
+- LiteLLM config is copied into a small derived image from `litellm_config.yaml`; no runtime file bind mount is required.
 
 ## Health Checks
 
