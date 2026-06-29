@@ -17,6 +17,8 @@ export type ApiKey = {
   status: 'active' | 'revoked' | string;
   userId: string;
   teamId?: string | null;
+  user?: Pick<User, 'id' | 'email' | 'name' | 'role'>;
+  team?: { id: string; slug: string; name: string } | null;
   lastUsedAt?: string | null;
   revokedAt?: string | null;
   createdAt?: string;
@@ -111,12 +113,25 @@ async function request<T>(token: string, path: string, init: RequestInit = {}): 
   }
 
   if (!response.ok) {
-    const payload = body as { error?: string; details?: unknown };
-    const details = payload?.details ? `: ${JSON.stringify(payload.details)}` : '';
-    throw new ApiError(`${payload?.error || 'Request failed'}${details}`, response.status);
+    throw new ApiError(formatApiError(body), response.status);
   }
 
   return body as T;
+}
+
+function formatApiError(body: unknown) {
+  const payload = body as {
+    error?: string | { message?: string; recovery?: string; details?: unknown };
+    details?: unknown;
+  };
+  if (typeof payload?.error === 'object' && payload.error) {
+    const details = payload.error.details ? `: ${JSON.stringify(payload.error.details)}` : '';
+    const recovery = payload.error.recovery ? ` ${payload.error.recovery}` : '';
+    return `${payload.error.message || 'Request failed.'}${recovery}${details}`;
+  }
+
+  const details = payload?.details ? `: ${JSON.stringify(payload.details)}` : '';
+  return `${payload?.error || 'Request failed.'}${details}`;
 }
 
 export const api = {
@@ -186,6 +201,12 @@ export const api = {
     request<ModelAlias>(token, '/model-aliases', { method: 'POST', body: JSON.stringify(payload) }),
   syncAlias: (token: string, id: string) =>
     request<ModelAlias>(token, `/model-aliases/${id}/sync`, { method: 'POST' }),
+  syncAllAliases: (token: string) =>
+    request<{ syncedAliases: number; aliases: Array<{ alias: string; synced: boolean }> }>(
+      token,
+      '/model-aliases/sync-all',
+      { method: 'POST' },
+    ),
   disableAlias: (token: string, id: string) =>
     request<ModelAlias>(token, `/model-aliases/${id}`, { method: 'DELETE' }),
   revokeKey: (token: string, id: string) =>

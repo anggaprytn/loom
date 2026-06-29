@@ -35,11 +35,26 @@ export async function buildApp(
 
   app.setErrorHandler((error: FastifyError & { issues?: unknown }, _request, reply) => {
     if (error.issues) {
-      return reply.code(400).send({ error: 'validation_error', details: error.issues });
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_FAILED',
+          message: 'Request validation failed.',
+          recovery: 'Review the highlighted fields and retry.',
+          retryable: false,
+          details: error.issues,
+        },
+      });
     }
 
     app.log.error(error);
-    return reply.code(500).send({ error: 'internal_server_error' });
+    return reply.code(500).send({
+      error: {
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'The admin API could not complete the request.',
+        recovery: 'Check server logs, then retry the operation.',
+        retryable: true,
+      },
+    });
   });
 
   return app;

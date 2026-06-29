@@ -1,18 +1,19 @@
 import {
   AlertTriangle,
   BarChart3,
+  Check,
   Copy,
   KeyRound,
   LayoutDashboard,
+  Loader2,
   LogOut,
+  MoreHorizontal,
   RefreshCw,
   Route,
   Search,
   Server,
   Settings,
-  Unlock,
   UserPlus,
-  X,
 } from 'lucide-react';
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import {
@@ -31,8 +32,19 @@ type Tab = 'overview' | 'keys' | 'providers' | 'aliases' | 'usage' | 'settings';
 type Tone = 'ok' | 'warn' | 'danger' | 'info' | 'off';
 type SortDir = 'asc' | 'desc';
 type SortState = { key: string; dir: SortDir };
-type Toast = { tone: Tone; message: string } | null;
+type Toast = { tone: Tone; message: string; persistent?: boolean } | null;
 type ActivityItem = { id: string; at: Date; tone: Tone; label: string };
+type LoadStatus = 'idle' | 'loading' | 'current' | 'stale' | 'failed';
+type SectionState = { status: LoadStatus; lastLoadedAt: Date | null; error?: string };
+type SectionStates = Record<SectionKey, SectionState>;
+type PendingAction =
+  | { kind: 'provider-health'; id: string }
+  | { kind: 'provider-rotate'; id: string }
+  | { kind: 'provider-disable'; id: string }
+  | { kind: 'alias-sync'; id: string }
+  | { kind: 'alias-disable'; id: string }
+  | { kind: 'key-revoke'; id: string }
+  | { kind: 'usage-refresh' };
 type ModalState =
   | null
   | {
@@ -41,13 +53,19 @@ type ModalState =
       body: ReactNode;
       label: string;
       confirmText: string;
+      success: string;
       action: () => Promise<void>;
+      pending?: PendingAction;
     }
   | { kind: 'rotate'; provider: Provider; affectedAliases: number }
   | { kind: 'details'; title: string; body: ReactNode };
 
 const emptyData: DashboardData = { users: [], providers: [], aliases: [], keys: [], usage: null };
 const tokenKey = 'tlg_admin_token';
+const sectionKeys: SectionKey[] = ['users', 'providers', 'aliases', 'keys', 'usage'];
+const emptySectionStates = Object.fromEntries(
+  sectionKeys.map((section) => [section, { status: 'idle', lastLoadedAt: null }]),
+) as SectionStates;
 
 const nav: Array<{ id: Tab; label: string; description: string; icon: ReactNode }> = [
   {
@@ -59,7 +77,7 @@ const nav: Array<{ id: Tab; label: string; description: string; icon: ReactNode 
   {
     id: 'keys',
     label: 'Users & Keys',
-    description: 'Create developers and issue personal LiteLLM virtual keys.',
+    description: 'Create developers and issue developer keys.',
     icon: <KeyRound />,
   },
   {
@@ -93,12 +111,16 @@ export function App() {
   const [token, setToken] = useState(() => localStorage.getItem(tokenKey) || '');
   const [data, setData] = useState<DashboardData>(emptyData);
   const [errors, setErrors] = useState<Partial<Record<SectionKey, string>>>({});
+  const [sectionStates, setSectionStates] = useState<SectionStates>(emptySectionStates);
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [toast, setToast] = useState<Toast>(null);
   const [modal, setModal] = useState<ModalState>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const current = nav.find((item) => item.id === tab)!;
+  const hasLoaded = Boolean(lastRefresh);
+  const hasFailures = Object.keys(errors).length > 0;
 
   const addActivity = (label: string, tone: Tone = 'info') => {
     setActivity((items) =>
@@ -107,20 +129,35 @@ export function App() {
   };
 
   const notify = (message: string, tone: Tone = 'ok') => {
-    setToast({ message, tone });
+    setToast({ message, tone, persistent: tone === 'danger' });
     window.clearTimeout(window.__loomToastTimer);
-    window.__loomToastTimer = window.setTimeout(() => setToast(null), 4200);
+    if (tone !== 'danger') {
+      window.__loomToastTimer = window.setTimeout(
+        () => setToast(null),
+        tone === 'warn' ? 7000 : 4200,
+      );
+    }
   };
 
   const refresh = async () => {
     if (!token.trim()) {
-      notify('Enter the admin token before refreshing.', 'warn');
+      notify('Enter the admin token before loading dashboard data.', 'warn');
       return;
     }
     setLoading(true);
+    setSectionStates(
+      (states) =>
+        Object.fromEntries(
+          sectionKeys.map((section) => [
+            section,
+            { ...states[section], status: 'loading', error: undefined },
+          ]),
+        ) as SectionStates,
+    );
     localStorage.setItem(tokenKey, token.trim());
     try {
       const result = await api.getDashboard(token.trim());
+      const loadedAt = new Date();
       setData((previous) => ({
         users: result.errors.users ? previous.users : result.data.users,
         providers: result.errors.providers ? previous.providers : result.data.providers,
@@ -128,34 +165,80 @@ export function App() {
         keys: result.errors.keys ? previous.keys : result.data.keys,
         usage: result.errors.usage ? previous.usage : result.data.usage,
       }));
+      setSectionStates((previous) => {
+        const next = { ...previous };
+        sectionKeys.forEach((section) => {
+          const message = result.errors[section];
+          if (message) {
+            next[section] = {
+              status: hasSectionData(section, data) ? 'stale' : 'failed',
+              lastLoadedAt: previous[section].lastLoadedAt,
+              error: message,
+            };
+          } else {
+            next[section] = { status: 'current', lastLoadedAt: loadedAt };
+          }
+        });
+        return next;
+      });
       setErrors(result.errors);
-      setLastRefresh(new Date());
+      setLastRefresh(loadedAt);
       const failed = Object.keys(result.errors).length;
       notify(
-        failed ? `Dashboard refreshed with ${failed} failed section(s).` : 'Dashboard refreshed.',
+        failed
+          ? `Dashboard loaded with ${failed} failed section${failed === 1 ? '' : 's'}.`
+          : 'Dashboard loaded.',
         failed ? 'warn' : 'ok',
       );
       addActivity(
-        failed ? `Refresh completed with ${failed} failed section(s)` : 'Dashboard refreshed',
+        failed
+          ? `Dashboard loaded with ${failed} failed section${failed === 1 ? '' : 's'}`
+          : 'Dashboard loaded',
         failed ? 'warn' : 'ok',
       );
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Refresh failed.', 'danger');
-      addActivity('Dashboard refresh failed', 'danger');
+      const message = error instanceof Error ? error.message : 'Dashboard load failed.';
+      setSectionStates(
+        (states) =>
+          Object.fromEntries(
+            sectionKeys.map((section) => [
+              section,
+              {
+                ...states[section],
+                status: hasSectionData(section, data) ? 'stale' : 'failed',
+                error: message,
+              },
+            ]),
+          ) as SectionStates,
+      );
+      notify(`Dashboard load failed. Check the admin API and retry. ${message}`, 'danger');
+      addActivity('Dashboard load failed', 'danger');
     } finally {
       setLoading(false);
     }
   };
 
-  const run = async (action: () => Promise<void>, success: string, tone: Tone = 'ok') => {
+  const run = async (
+    action: () => Promise<void>,
+    success: string,
+    tone: Tone = 'ok',
+    pending?: PendingAction,
+  ) => {
+    if (pending) setPendingAction(pending);
     try {
       await action();
       notify(success, tone);
       addActivity(success, tone);
       await refresh();
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Action failed.', 'danger');
-      addActivity(error instanceof Error ? error.message : 'Action failed.', 'danger');
+      const message = error instanceof Error ? error.message : 'Action failed.';
+      notify(
+        `${success.replace(/\.$/, '')} failed. Check the object state and retry. ${message}`,
+        'danger',
+      );
+      addActivity(message, 'danger');
+    } finally {
+      if (pending) setPendingAction(null);
     }
   };
 
@@ -164,9 +247,10 @@ export function App() {
     setToken('');
     setData(emptyData);
     setErrors({});
+    setSectionStates(emptySectionStates);
     setLastRefresh(null);
-    notify('Admin session cleared.', 'warn');
-    addActivity('Admin session cleared', 'warn');
+    notify('Token cleared. Dashboard data removed from this browser.', 'warn');
+    addActivity('Token cleared', 'warn');
   };
 
   return (
@@ -193,7 +277,12 @@ export function App() {
             <p>{current.description}</p>
           </div>
           <div className="session">
-            <Badge tone={token ? 'ok' : 'warn'}>{token ? 'Admin session' : 'Locked'}</Badge>
+            <DashboardStatusBadge
+              token={token}
+              loading={loading}
+              hasLoaded={hasLoaded}
+              hasFailures={hasFailures}
+            />
             <input
               aria-label="Admin token"
               type="password"
@@ -202,14 +291,17 @@ export function App() {
               placeholder="ADMIN_TOKEN"
               autoComplete="off"
             />
-            <Button tone="primary" icon={<Unlock />} onClick={refresh} disabled={loading}>
-              Unlock
+            <Button
+              tone="primary"
+              icon={<RefreshCw />}
+              onClick={refresh}
+              disabled={loading}
+              loading={loading}
+            >
+              {loading ? 'Loading dashboard' : hasLoaded ? 'Reload dashboard' : 'Load dashboard'}
             </Button>
-            <Button icon={<X />} onClick={clearSession}>
-              Clear
-            </Button>
-            <Button icon={<RefreshCw />} onClick={refresh} disabled={loading}>
-              {loading ? 'Refreshing' : 'Refresh'}
+            <Button tone="utility" icon={<LogOut />} onClick={clearSession}>
+              Clear token
             </Button>
           </div>
         </header>
@@ -221,6 +313,8 @@ export function App() {
               loading={loading}
               lastRefresh={lastRefresh}
               errors={errors}
+              sectionStates={sectionStates}
+              onRetry={refresh}
               activity={activity}
             />
           )}
@@ -232,21 +326,49 @@ export function App() {
               run={run}
               notify={notify}
               setModal={setModal}
+              pendingAction={pendingAction}
+              onRetry={refresh}
             />
           )}
           {tab === 'providers' && (
-            <Providers data={data} errors={errors} token={token} run={run} setModal={setModal} />
+            <Providers
+              data={data}
+              errors={errors}
+              token={token}
+              run={run}
+              setModal={setModal}
+              pendingAction={pendingAction}
+              onRetry={refresh}
+            />
           )}
           {tab === 'aliases' && (
-            <Aliases data={data} errors={errors} token={token} run={run} setModal={setModal} />
+            <Aliases
+              data={data}
+              errors={errors}
+              token={token}
+              run={run}
+              setModal={setModal}
+              pendingAction={pendingAction}
+              onRetry={refresh}
+            />
           )}
-          {tab === 'usage' && <Usage data={data} errors={errors} token={token} notify={notify} />}
+          {tab === 'usage' && (
+            <Usage
+              data={data}
+              errors={errors}
+              token={token}
+              notify={notify}
+              pendingAction={pendingAction}
+              setPendingAction={setPendingAction}
+              onRetry={refresh}
+            />
+          )}
           {tab === 'settings' && <SettingsView clearSession={clearSession} notify={notify} />}
         </main>
       </div>
 
       {modal && <Modal modal={modal} token={token} run={run} close={() => setModal(null)} />}
-      {toast && <div className={`toast ${toast.tone}`}>{toast.message}</div>}
+      {toast && <ToastView toast={toast} close={() => setToast(null)} />}
     </div>
   );
 }
@@ -256,12 +378,16 @@ function Overview({
   loading,
   lastRefresh,
   errors,
+  sectionStates,
+  onRetry,
   activity,
 }: {
   data: DashboardData;
   loading: boolean;
   lastRefresh: Date | null;
   errors: Partial<Record<SectionKey, string>>;
+  sectionStates: SectionStates;
+  onRetry: () => void;
   activity: ActivityItem[];
 }) {
   const enabledProviders = data.providers.filter((provider) => provider.enabled).length;
@@ -281,18 +407,26 @@ function Overview({
     : healthy
       ? 'Healthy'
       : data.providers.length
-        ? 'Needs check'
-        : 'No provider';
+        ? 'Unchecked'
+        : 'No providers configured';
   const failedSections = Object.entries(errors);
 
   return (
     <>
       {failedSections.length > 0 && (
         <div className="inline-error">
-          <strong>Partial data failure</strong>
+          <strong>Some dashboard data failed to load.</strong>
+          <p>
+            Loaded sections may be current, but failed sections are showing stale or missing data.
+          </p>
           {failedSections.map(([section, message]) => (
-            <div key={section}>
-              {section}: {message}
+            <div className="error-row" key={section}>
+              <span>
+                <strong>{titleCase(section)}</strong>: {message}
+              </span>
+              <Button tone="utility" onClick={onRetry}>
+                Retry section
+              </Button>
             </div>
           ))}
         </div>
@@ -306,12 +440,16 @@ function Overview({
         <Metric
           label="Enabled model aliases"
           value={enabledAliases}
-          badge={<Badge tone="info">LiteLLM routes</Badge>}
+          badge={
+            <Badge tone={enabledAliases ? 'ok' : 'warn'}>
+              {enabledAliases ? 'Enabled' : 'Unchecked'}
+            </Badge>
+          }
         />
         <Metric
-          label="Active user keys"
+          label="Active developer keys"
           value={activeKeys}
-          badge={<Badge tone="ok">Virtual keys</Badge>}
+          badge={<Badge tone={activeKeys ? 'ok' : 'off'}>{activeKeys ? 'Active' : 'None'}</Badge>}
         />
       </div>
       <div className="grid two stack">
@@ -321,28 +459,40 @@ function Overview({
         >
           <StatusLine
             label="Control plane API"
-            value={lastRefresh ? 'Connected' : 'Not loaded'}
-            tone={lastRefresh ? 'ok' : 'warn'}
+            value={
+              lastRefresh ? (failedSections.length ? 'Some data failed' : 'Current') : 'Not loaded'
+            }
+            tone={failedSections.length ? 'warn' : lastRefresh ? 'ok' : 'warn'}
           />
           <StatusLine
             label="Providers configured"
-            value={enabledProviders ? `${enabledProviders} enabled` : 'None yet'}
+            value={enabledProviders ? `${enabledProviders} Enabled` : 'None yet'}
             tone={enabledProviders ? 'ok' : 'warn'}
           />
           <StatusLine
             label="Model aliases"
-            value={enabledAliases ? `${enabledAliases} enabled` : 'None yet'}
+            value={enabledAliases ? `${enabledAliases} Enabled` : 'None yet'}
             tone={enabledAliases ? 'ok' : 'warn'}
           />
           <StatusLine
-            label="User keys"
-            value={activeKeys ? `${activeKeys} active` : 'No active keys'}
+            label="Developer keys"
+            value={activeKeys ? `${activeKeys} Active` : 'No active keys'}
             tone={activeKeys ? 'ok' : 'info'}
           />
+          <div className="section-state-list">
+            {sectionKeys.map((section) => (
+              <div className="section-state" key={section}>
+                <span>{titleCase(section)}</span>
+                <Badge tone={sectionTone(sectionStates[section].status)}>
+                  {sectionLabel(sectionStates[section].status)}
+                </Badge>
+              </div>
+            ))}
+          </div>
           <div className="meta-line">
             {loading
-              ? 'Refreshing data...'
-              : `Last refreshed: ${lastRefresh ? formatDate(lastRefresh) : 'never'}`}
+              ? 'Loading dashboard data...'
+              : `Last loaded: ${lastRefresh ? formatRelativeDate(lastRefresh) : 'Never'}`}
           </div>
         </Panel>
         <Panel
@@ -352,9 +502,9 @@ function Overview({
           <div className="callout info">
             1. Add provider and run health check.
             <br />
-            2. Create model aliases and sync them to LiteLLM.
+            2. Create model aliases and sync them.
             <br />
-            3. Create developer user and personal LiteLLM key.
+            3. Create developer user and issue a developer key.
             <br />
             4. Test client tooling against <code>code-premium</code>.
           </div>
@@ -376,7 +526,7 @@ function Overview({
             ))}
           </div>
         ) : (
-          <div className="empty">No operator activity in this browser session yet.</div>
+          <div className="empty">No actions recorded in this browser session.</div>
         )}
       </Panel>
     </>
@@ -390,13 +540,22 @@ function Keys({
   run,
   notify,
   setModal,
+  pendingAction,
+  onRetry,
 }: {
   data: DashboardData;
   errors: Partial<Record<SectionKey, string>>;
   token: string;
-  run: (action: () => Promise<void>, success: string, tone?: Tone) => Promise<void>;
+  run: (
+    action: () => Promise<void>,
+    success: string,
+    tone?: Tone,
+    pending?: PendingAction,
+  ) => Promise<void>;
   notify: (message: string, tone?: Tone) => void;
   setModal: (modal: ModalState) => void;
+  pendingAction: PendingAction | null;
+  onRetry: () => void;
 }) {
   const [filters, setFilters] = useState({ q: '', status: 'all' });
   const [sort, setSort] = useState<SortState>({ key: 'createdAt', dir: 'desc' });
@@ -408,7 +567,8 @@ function Keys({
     'status',
     'litellmKeyAlias',
   ]);
-  const [newKey, setNewKey] = useState('');
+  const [newKey, setNewKey] = useState<{ value: string; developer: string } | null>(null);
+  const [copiedKey, setCopiedKey] = useState(false);
 
   const createUser = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -429,7 +589,7 @@ function Keys({
             team: teamSlug ? { slug: teamSlug, name: teamName || teamSlug } : undefined,
           })
           .then(() => undefined),
-      'User created.',
+      `Developer created: ${email}.`,
     );
     event.currentTarget.reset();
   };
@@ -446,46 +606,67 @@ function Keys({
       .filter(Boolean);
     const models = checkedModels.length ? checkedModels : fallbackModels;
     if (!userId || !name || !models.length)
-      return notify('User, key name, and model access are required.', 'warn');
+      return notify('Developer, key name, and model access are required.', 'warn');
+    const developer = data.users.find((user) => user.id === userId);
     try {
       const key = await api.createKey(token, { userId, name, models });
-      setNewKey(key.apiKey);
-      notify('LiteLLM virtual key created.');
+      setNewKey({ value: key.apiKey, developer: developer?.email || userId });
+      setCopiedKey(false);
+      notify(`Developer key issued for ${developer?.email || userId}.`);
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Failed to create key.', 'danger');
+      notify(
+        `Developer key issue failed. Check the selected developer and model access, then retry. ${
+          error instanceof Error ? error.message : ''
+        }`,
+        'danger',
+      );
     }
   };
 
   return (
     <>
-      <SectionErrors errors={errors} sections={['users', 'keys', 'aliases']} />
-      <div className="grid two">
-        <Panel
-          title="Invite Developer"
-          subtitle="Create a user first, then issue a personal LiteLLM virtual key."
-        >
-          <form className="form-grid" onSubmit={createUser}>
+      <SectionErrors errors={errors} sections={['users', 'keys', 'aliases']} onRetry={onRetry} />
+      {newKey && (
+        <OneTimeSecretPanel
+          value={newKey.value}
+          copied={copiedKey}
+          setCopied={setCopiedKey}
+          notify={notify}
+          dismiss={() => setNewKey(null)}
+        />
+      )}
+      <Panel
+        title="Issue developer key"
+        subtitle="Developer keys are LiteLLM virtual keys. Each key belongs to one developer and should be stored in their secret manager."
+      >
+        <div className="flow-grid">
+          <form className="form-grid flow-card" onSubmit={createUser}>
+            <div className="flow-heading full">
+              <Badge tone="info">Step 1</Badge>
+              <strong>Create developer</strong>
+              <span>Use this only when the developer does not already exist.</span>
+            </div>
             <Field label="Email" name="email" required placeholder="dev@example.com" />
             <Field label="Name" name="name" required placeholder="Dev Example" />
             <Field label="Team Slug" name="teamSlug" placeholder="engineering" />
             <Field label="Team Name" name="teamName" placeholder="Engineering" />
             <div className="actions full">
-              <Button tone="primary" icon={<UserPlus />} type="submit">
-                Create User
+              <Button tone="secondary" icon={<UserPlus />} type="submit">
+                Create developer
               </Button>
             </div>
           </form>
-        </Panel>
-        <Panel
-          title="Issue Personal Key"
-          subtitle="The plaintext key is returned once. Store it in the developer's secret manager."
-        >
-          <form className="form-grid" onSubmit={createKey}>
+          <form className="form-grid flow-card primary-flow" onSubmit={createKey}>
+            <div className="flow-heading full">
+              <Badge tone="info">Step 2</Badge>
+              <strong>Issue access</strong>
+              <span>Select a developer, choose allowed aliases, then issue the key.</span>
+            </div>
             <label className="field full">
-              <span>User *</span>
+              <span>Developer *</span>
               <select name="userId" required>
                 <option value="">
-                  {data.users.length ? 'Select user' : 'Create a user first'}
+                  {data.users.length ? 'Select developer' : 'Create a developer first'}
                 </option>
                 {data.users.map((user) => (
                   <option key={user.id} value={user.id}>
@@ -517,111 +698,120 @@ function Keys({
             </div>
             <div className="actions full">
               <Button tone="primary" icon={<KeyRound />} type="submit">
-                Create Key
+                Issue developer key
               </Button>
             </div>
           </form>
-          {newKey && (
-            <div className="secret">
-              <strong>Copy this key now. It will not be shown again.</strong>
-              <code>{newKey}</code>
-              <Button
-                icon={<Copy />}
-                onClick={() => navigator.clipboard.writeText(newKey).then(() => notify('Copied.'))}
-              >
-                Copy Key
-              </Button>
-            </div>
-          )}
-        </Panel>
-      </div>
-      <Panel className="stack">
+        </div>
+      </Panel>
+      <Panel className={`stack ${newKey ? 'muted-panel' : ''}`}>
         <TableToolbar
-          title="Keys"
-          hint="Revoke from the table when a key leaks or a user leaves."
+          title="Developer Keys"
+          hint="Revoke a key only when it leaks or a developer loses access."
           filters={filters}
           setFilters={setFilters}
           options={['active', 'revoked']}
         />
         <DataTable
-          empty="No keys yet. Create a user, then issue a personal LiteLLM virtual key."
+          empty="No developer keys yet. Select a developer and issue the first key."
           sort={sort}
           setSort={setSort}
           columns={[
             {
               key: 'name',
-              label: 'Name',
+              label: 'Developer key',
               render: (key: ApiKey) => (
                 <>
                   <strong>{key.name}</strong>
-                  <div className="hint mono">{key.litellmKeyAlias}</div>
+                  <div className="hint mono">{key.prefix}</div>
+                  {key.litellmKeyAlias && <div className="hint mono">{key.litellmKeyAlias}</div>}
                 </>
               ),
             },
-            { key: 'prefix', label: 'Prefix', className: 'mono' },
-            { key: 'userId', label: 'User', className: 'mono' },
+            {
+              key: 'userId',
+              label: 'Developer',
+              render: (key: ApiKey) => {
+                const user = data.users.find((item) => item.id === key.userId);
+                return (
+                  <>
+                    <strong>{user?.email || key.userId}</strong>
+                    {user?.name && <div className="hint">{user.name}</div>}
+                  </>
+                );
+              },
+            },
             {
               key: 'teamId',
               label: 'Team',
-              render: (key: ApiKey) => <span className="mono">{key.teamId || '-'}</span>,
+              render: (key: ApiKey) => <span className="mono">{key.teamId || 'None'}</span>,
             },
             {
               key: 'status',
               label: 'Status',
-              render: (key: ApiKey) => (
-                <Badge tone={key.status === 'active' ? 'ok' : 'off'}>{key.status}</Badge>
-              ),
+              render: (key: ApiKey) =>
+                pendingAction?.kind === 'key-revoke' && pendingAction.id === key.id ? (
+                  <PendingBadge>Revoking...</PendingBadge>
+                ) : (
+                  <Badge tone={key.status === 'active' ? 'ok' : 'off'}>
+                    {titleCase(key.status)}
+                  </Badge>
+                ),
             },
             {
               key: 'createdAt',
               label: 'Created',
-              render: (key: ApiKey) => formatDate(key.createdAt),
+              render: (key: ApiKey) => <RelativeTime value={key.createdAt} />,
             },
             {
               key: 'lastUsedAt',
-              label: 'Last Used',
-              render: (key: ApiKey) => formatDate(key.lastUsedAt),
+              label: 'Last used',
+              render: (key: ApiKey) => <RelativeTime value={key.lastUsedAt} empty="Never" />,
             },
             {
               key: 'actions',
               label: 'Actions',
               sortable: false,
               render: (key: ApiKey) => (
-                <div className="row tight">
-                  <Button
-                    onClick={() =>
-                      setModal({
-                        kind: 'details',
-                        title: `Key: ${key.name}`,
-                        body: <RecordDetails rows={objectRows(key)} />,
-                      })
-                    }
-                  >
-                    Details
-                  </Button>
-                  {key.status === 'active' ? (
-                    <Button
-                      tone="danger"
-                      onClick={() =>
+                <ActionMenu
+                  label="Key actions"
+                  items={[
+                    {
+                      label: 'View details',
+                      onClick: () =>
                         setModal({
-                          kind: 'danger',
-                          title: 'Revoke key',
-                          label: 'Revoke key',
-                          confirmText: key.prefix,
-                          body: (
-                            <>
-                              Existing clients using prefix <code>{key.prefix}</code> will fail
-                              immediately. Type <code>{key.prefix}</code> to confirm.
-                            </>
-                          ),
-                          action: () => api.revokeKey(token, key.id).then(() => undefined),
-                        })
-                      }
-                    >
-                      Revoke
-                    </Button>
-                  ) : null}
-                </div>
+                          kind: 'details',
+                          title: `Developer key: ${key.name}`,
+                          body: <RecordDetails rows={objectRows(key)} />,
+                        }),
+                    },
+                    ...(key.status === 'active'
+                      ? [
+                          {
+                            label: 'Revoke key',
+                            danger: true,
+                            onClick: () =>
+                              setModal({
+                                kind: 'danger',
+                                title: 'Revoke developer key',
+                                label: 'Revoke key',
+                                confirmText: key.prefix,
+                                success: `Developer key revoked: ${key.prefix}.`,
+                                pending: { kind: 'key-revoke', id: key.id },
+                                body: (
+                                  <>
+                                    This revokes key <code>{key.prefix}</code>. Existing clients
+                                    using this key will fail immediately. Revocation cannot reveal
+                                    the old key again. To recover, issue a new developer key.
+                                  </>
+                                ),
+                                action: () => api.revokeKey(token, key.id).then(() => undefined),
+                              }),
+                          },
+                        ]
+                      : []),
+                  ]}
+                />
               ),
             },
           ]}
@@ -638,12 +828,21 @@ function Providers({
   token,
   run,
   setModal,
+  pendingAction,
+  onRetry,
 }: {
   data: DashboardData;
   errors: Partial<Record<SectionKey, string>>;
   token: string;
-  run: (action: () => Promise<void>, success: string, tone?: Tone) => Promise<void>;
+  run: (
+    action: () => Promise<void>,
+    success: string,
+    tone?: Tone,
+    pending?: PendingAction,
+  ) => Promise<void>;
   setModal: (modal: ModalState) => void;
+  pendingAction: PendingAction | null;
+  onRetry: () => void;
 }) {
   const [filters, setFilters] = useState({ q: '', status: 'all' });
   const [sort, setSort] = useState<SortState>({ key: 'slug', dir: 'asc' });
@@ -662,14 +861,14 @@ function Providers({
         api
           .createProvider(token, { slug, name, baseUrl, apiKey: apiKey || undefined })
           .then(() => undefined),
-      'Provider created. Run health check next.',
+      `Provider created: ${slug}. Run Check health next.`,
     );
     event.currentTarget.reset();
   };
 
   return (
     <>
-      <SectionErrors errors={errors} sections={['providers', 'aliases']} />
+      <SectionErrors errors={errors} sections={['providers', 'aliases']} onRetry={onRetry} />
       <div className="grid two">
         <Panel
           title="Add Provider"
@@ -702,6 +901,7 @@ function Providers({
         <Panel
           title="Provider Rules"
           subtitle="Keep upstreams private and stable. Developers should never call them directly."
+          quiet
         >
           <div className="callout warn">
             Browser sessions, shared personal subscriptions, and cookies are not valid provider
@@ -732,17 +932,37 @@ function Providers({
                 </>
               ),
             },
-            { key: 'baseUrl', label: 'Base URL', className: 'mono truncate' },
+            { key: 'baseUrl', label: 'Endpoint', className: 'mono truncate' },
+            {
+              key: 'enabled',
+              label: 'Enabled',
+              render: (p: Provider) => (
+                <Badge tone={p.enabled ? 'ok' : 'off'}>{p.enabled ? 'Enabled' : 'Disabled'}</Badge>
+              ),
+            },
             {
               key: 'apiKeyLast4',
               label: 'Key',
-              render: (p: Provider) => (p.apiKeyLast4 ? `***${p.apiKeyLast4}` : 'none'),
+              render: (p: Provider) => (p.apiKeyLast4 ? `Ending in ${p.apiKeyLast4}` : 'No key'),
             },
-            { key: 'healthStatus', label: 'Health', render: (p: Provider) => providerBadge(p) },
+            {
+              key: 'healthStatus',
+              label: 'Health',
+              render: (p: Provider) =>
+                pendingAction?.kind === 'provider-health' && pendingAction.id === p.id ? (
+                  <PendingBadge>Checking...</PendingBadge>
+                ) : pendingAction?.kind === 'provider-rotate' && pendingAction.id === p.id ? (
+                  <PendingBadge>Rotating key...</PendingBadge>
+                ) : pendingAction?.kind === 'provider-disable' && pendingAction.id === p.id ? (
+                  <PendingBadge>Disabling...</PendingBadge>
+                ) : (
+                  providerBadge(p)
+                ),
+            },
             {
               key: 'lastHealthAt',
-              label: 'Last Check',
-              render: (p: Provider) => formatDate(p.lastHealthAt),
+              label: 'Last health check',
+              render: (p: Provider) => <RelativeTime value={p.lastHealthAt} empty="Never" />,
             },
             {
               key: 'actions',
@@ -751,65 +971,77 @@ function Providers({
               render: (p: Provider) => (
                 <div className="row tight">
                   <Button
-                    onClick={() =>
-                      setModal({
-                        kind: 'details',
-                        title: `Provider: ${p.slug}`,
-                        body: (
-                          <RecordDetails
-                            rows={[
-                              ...objectRows(p),
-                              ['Affected aliases', affectedAliases(data.aliases, p.id).toString()],
-                            ]}
-                          />
-                        ),
-                      })
-                    }
-                  >
-                    Details
-                  </Button>
-                  <Button
+                    loading={pendingAction?.kind === 'provider-health' && pendingAction.id === p.id}
                     onClick={() =>
                       run(
                         () => api.checkProvider(token, p.id).then(() => undefined),
-                        'Provider health checked.',
+                        `Provider health checked: ${p.slug}.`,
+                        'ok',
+                        { kind: 'provider-health', id: p.id },
                       )
                     }
                   >
-                    Health
+                    Check health
                   </Button>
-                  <Button
-                    onClick={() =>
-                      setModal({
-                        kind: 'rotate',
-                        provider: p,
-                        affectedAliases: affectedAliases(data.aliases, p.id),
-                      })
-                    }
-                  >
-                    Rotate
-                  </Button>
-                  <Button
-                    tone="danger"
-                    onClick={() =>
-                      setModal({
-                        kind: 'danger',
-                        title: 'Disable provider',
+                  <ActionMenu
+                    label="Provider actions"
+                    items={[
+                      {
+                        label: 'View details',
+                        onClick: () =>
+                          setModal({
+                            kind: 'details',
+                            title: `Provider: ${p.slug}`,
+                            body: (
+                              <RecordDetails
+                                rows={[
+                                  ...objectRows(p),
+                                  [
+                                    'Affected aliases',
+                                    affectedAliases(data.aliases, p.id).toString(),
+                                  ],
+                                ]}
+                              />
+                            ),
+                          }),
+                      },
+                      {
+                        label: 'Rotate key',
+                        onClick: () =>
+                          setModal({
+                            kind: 'rotate',
+                            provider: p,
+                            affectedAliases: affectedAliases(data.aliases, p.id),
+                          }),
+                      },
+                      {
                         label: 'Disable provider',
-                        confirmText: p.slug,
-                        body: (
-                          <>
-                            Disable <strong>{p.slug}</strong> and{' '}
-                            <strong>{affectedAliases(data.aliases, p.id)}</strong> local aliases.
-                            Active routes may fail. Type <code>{p.slug}</code> to confirm.
-                          </>
-                        ),
-                        action: () => api.disableProvider(token, p.id).then(() => undefined),
-                      })
-                    }
-                  >
-                    Disable
-                  </Button>
+                        danger: true,
+                        onClick: () =>
+                          setModal({
+                            kind: 'danger',
+                            title: 'Disable provider',
+                            label: 'Disable provider',
+                            confirmText: p.slug,
+                            success: `Provider disabled: ${p.slug}. ${affectedAliases(
+                              data.aliases,
+                              p.id,
+                            )} aliases were disabled.`,
+                            pending: { kind: 'provider-disable', id: p.id },
+                            body: (
+                              <>
+                                This disables provider <strong>{p.slug}</strong> and{' '}
+                                <strong>{affectedAliases(data.aliases, p.id)}</strong> enabled
+                                aliases that route through it. Traffic using those aliases may fail
+                                immediately. Historical usage data is preserved. To recover,
+                                re-enable or recreate the provider, then sync affected aliases.
+                              </>
+                            ),
+                            action: () => api.disableProvider(token, p.id).then(() => undefined),
+                          }),
+                      },
+                    ]}
+                  />
                 </div>
               ),
             },
@@ -827,12 +1059,21 @@ function Aliases({
   token,
   run,
   setModal,
+  pendingAction,
+  onRetry,
 }: {
   data: DashboardData;
   errors: Partial<Record<SectionKey, string>>;
   token: string;
-  run: (action: () => Promise<void>, success: string, tone?: Tone) => Promise<void>;
+  run: (
+    action: () => Promise<void>,
+    success: string,
+    tone?: Tone,
+    pending?: PendingAction,
+  ) => Promise<void>;
   setModal: (modal: ModalState) => void;
+  pendingAction: PendingAction | null;
+  onRetry: () => void;
 }) {
   const [filters, setFilters] = useState({ q: '', status: 'all' });
   const [sort, setSort] = useState<SortState>({ key: 'alias', dir: 'asc' });
@@ -851,13 +1092,13 @@ function Aliases({
     if (!alias || !providerId || !upstreamModel) return;
     await run(
       () => api.createAlias(token, { alias, providerId, upstreamModel }).then(() => undefined),
-      'Alias created and sync requested.',
+      `Alias created and sync requested: ${alias}.`,
     );
   };
 
   return (
     <>
-      <SectionErrors errors={errors} sections={['aliases', 'providers']} />
+      <SectionErrors errors={errors} sections={['aliases', 'providers']} onRetry={onRetry} />
       <div className="grid two">
         <Panel
           title="Create Model Alias"
@@ -889,7 +1130,7 @@ function Aliases({
             />
             <div className="actions full">
               <Button tone="primary" icon={<Route />} type="submit">
-                Create + Sync
+                Create and sync alias
               </Button>
             </div>
           </form>
@@ -897,6 +1138,7 @@ function Aliases({
         <Panel
           title="Routing Preview"
           subtitle="Developers see aliases. Operators control provider and upstream model mapping."
+          quiet
         >
           <div className="callout info">
             <code>
@@ -924,18 +1166,25 @@ function Aliases({
               label: 'Provider',
               render: (a: ModelAlias) => a.provider?.slug || 'unknown',
             },
-            { key: 'upstreamModel', label: 'Upstream Model', className: 'mono truncate' },
+            { key: 'upstreamModel', label: 'Upstream model', className: 'mono truncate' },
             {
               key: 'enabled',
-              label: 'Status',
-              render: (a: ModelAlias) => (
-                <Badge tone={a.enabled ? 'ok' : 'off'}>{a.enabled ? 'Enabled' : 'Disabled'}</Badge>
-              ),
+              label: 'Enabled',
+              render: (a: ModelAlias) =>
+                pendingAction?.kind === 'alias-sync' && pendingAction.id === a.id ? (
+                  <PendingBadge>Syncing...</PendingBadge>
+                ) : pendingAction?.kind === 'alias-disable' && pendingAction.id === a.id ? (
+                  <PendingBadge>Disabling...</PendingBadge>
+                ) : (
+                  <Badge tone={a.enabled ? 'ok' : 'off'}>
+                    {a.enabled ? 'Enabled' : 'Disabled'}
+                  </Badge>
+                ),
             },
             {
               key: 'updatedAt',
-              label: 'Updated',
-              render: (a: ModelAlias) => formatDate(a.updatedAt || a.createdAt),
+              label: 'Last synced',
+              render: (a: ModelAlias) => <RelativeTime value={a.updatedAt || a.createdAt} />,
             },
             {
               key: 'actions',
@@ -944,43 +1193,53 @@ function Aliases({
               render: (a: ModelAlias) => (
                 <div className="row tight">
                   <Button
+                    loading={pendingAction?.kind === 'alias-sync' && pendingAction.id === a.id}
                     onClick={() =>
-                      setModal({
-                        kind: 'details',
-                        title: `Alias: ${a.alias}`,
-                        body: <RecordDetails rows={objectRows(a)} />,
-                      })
+                      run(
+                        () => api.syncAlias(token, a.id).then(() => undefined),
+                        `Alias synced: ${a.alias}.`,
+                        'ok',
+                        { kind: 'alias-sync', id: a.id },
+                      )
                     }
                   >
-                    Details
+                    Sync alias
                   </Button>
-                  <Button
-                    onClick={() =>
-                      run(() => api.syncAlias(token, a.id).then(() => undefined), 'Alias synced.')
-                    }
-                  >
-                    Sync
-                  </Button>
-                  <Button
-                    tone="danger"
-                    onClick={() =>
-                      setModal({
-                        kind: 'danger',
-                        title: 'Disable alias',
+                  <ActionMenu
+                    label="Alias actions"
+                    items={[
+                      {
+                        label: 'View details',
+                        onClick: () =>
+                          setModal({
+                            kind: 'details',
+                            title: `Alias: ${a.alias}`,
+                            body: <RecordDetails rows={objectRows(a)} />,
+                          }),
+                      },
+                      {
                         label: 'Disable alias',
-                        confirmText: a.alias,
-                        body: (
-                          <>
-                            Clients using <code>{a.alias}</code> may fail until they switch routes.
-                            Type <code>{a.alias}</code> to confirm.
-                          </>
-                        ),
-                        action: () => api.disableAlias(token, a.id).then(() => undefined),
-                      })
-                    }
-                  >
-                    Disable
-                  </Button>
+                        danger: true,
+                        onClick: () =>
+                          setModal({
+                            kind: 'danger',
+                            title: 'Disable alias',
+                            label: 'Disable alias',
+                            confirmText: a.alias,
+                            success: `Alias disabled: ${a.alias}.`,
+                            pending: { kind: 'alias-disable', id: a.id },
+                            body: (
+                              <>
+                                This disables alias <code>{a.alias}</code>. Clients using this model
+                                name may fail immediately until they switch routes or the alias is
+                                restored. To recover, recreate or re-enable the alias and sync it.
+                              </>
+                            ),
+                            action: () => api.disableAlias(token, a.id).then(() => undefined),
+                          }),
+                      },
+                    ]}
+                  />
                 </div>
               ),
             },
@@ -997,11 +1256,17 @@ function Usage({
   errors,
   token,
   notify,
+  pendingAction,
+  setPendingAction,
+  onRetry,
 }: {
   data: DashboardData;
   errors: Partial<Record<SectionKey, string>>;
   token: string;
   notify: (message: string, tone?: Tone) => void;
+  pendingAction: PendingAction | null;
+  setPendingAction: (pending: PendingAction | null) => void;
+  onRetry: () => void;
 }) {
   const [usage, setUsage] = useState<UsageResponse | null>(data.usage);
   const [source, setSource] = useState<'litellm' | 'local'>('litellm');
@@ -1014,19 +1279,28 @@ function Usage({
     event.preventDefault();
     if (!token.trim()) return notify('Enter the admin token before loading usage.', 'warn');
     setLoading(true);
+    setPendingAction({ kind: 'usage-refresh' });
     try {
       setUsage(await api.getUsage(token, { source, from: from || undefined, to: to || undefined }));
-      notify('Usage refreshed.');
+      notify(
+        `Usage refreshed from ${source === 'litellm' ? 'LiteLLM spend logs' : 'local ingest records'}.`,
+      );
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Usage refresh failed.', 'danger');
+      notify(
+        `Usage refresh failed. Check ${
+          source === 'litellm' ? 'LiteLLM spend logs' : 'local ingest records'
+        } and retry. ${error instanceof Error ? error.message : ''}`,
+        'danger',
+      );
     } finally {
       setLoading(false);
+      setPendingAction(null);
     }
   };
 
   return (
     <>
-      <SectionErrors errors={errors} sections={['usage']} />
+      <SectionErrors errors={errors} sections={['usage']} onRetry={onRetry} />
       <div className="grid three">
         <Metric label="Requests" value={usage?.totals.requests || 0} />
         <Metric label="Total tokens" value={usage?.totals.totalTokens || 0} />
@@ -1060,11 +1334,17 @@ function Usage({
             <input type="date" value={to} onChange={(event) => setTo(event.target.value)} />
           </label>
           <div className="actions">
-            <Button type="submit" icon={<RefreshCw />} disabled={loading}>
-              {loading ? 'Loading' : 'Apply'}
+            <Button
+              type="submit"
+              icon={<RefreshCw />}
+              disabled={loading}
+              loading={pendingAction?.kind === 'usage-refresh'}
+            >
+              {loading ? 'Refreshing usage' : 'Refresh usage'}
             </Button>
           </div>
         </form>
+        {pendingAction?.kind === 'usage-refresh' && <PendingBadge>Refreshing...</PendingBadge>}
         <div className="grid two">
           <UsageTable title="By User" rows={usage?.byUser || []} rowKey="userId" />
           <UsageTable title="By Model" rows={usage?.byModel || []} rowKey="model" />
@@ -1085,10 +1365,7 @@ function SettingsView({
     'OPENAI_BASE_URL=https://llm.apps.anggaprytn.com/v1\nOPENAI_API_KEY=<personal_litellm_key>\nOPENAI_MODEL=code-premium';
   return (
     <div className="grid two">
-      <Panel
-        title="Codex Configuration"
-        subtitle="Give each developer their own LiteLLM virtual key."
-      >
+      <Panel title="Codex Configuration" subtitle="Give each developer their own developer key.">
         <pre className="callout info mono">{env}</pre>
       </Panel>
       <Panel
@@ -1097,13 +1374,16 @@ function SettingsView({
       >
         <div className="actions">
           <Button
+            tone="utility"
             icon={<Copy />}
-            onClick={() => navigator.clipboard.writeText(env).then(() => notify('Copied.'))}
+            onClick={() =>
+              navigator.clipboard.writeText(env).then(() => notify('Codex config copied.'))
+            }
           >
-            Copy Codex Env
+            Copy Codex config
           </Button>
-          <Button tone="danger" icon={<LogOut />} onClick={clearSession}>
-            Clear Admin Session
+          <Button tone="utility" icon={<LogOut />} onClick={clearSession}>
+            Clear token
           </Button>
         </div>
       </Panel>
@@ -1119,7 +1399,12 @@ function Modal({
 }: {
   modal: ModalState;
   token: string;
-  run: (action: () => Promise<void>, success: string, tone?: Tone) => Promise<void>;
+  run: (
+    action: () => Promise<void>,
+    success: string,
+    tone?: Tone,
+    pending?: PendingAction,
+  ) => Promise<void>;
   close: () => void;
 }) {
   const [apiKey, setApiKey] = useState('');
@@ -1129,13 +1414,15 @@ function Modal({
     if (modal.kind !== 'rotate' || !apiKey.trim()) return;
     await run(
       () => api.rotateProvider(token, modal.provider.id, apiKey.trim()).then(() => undefined),
-      'Provider key rotated.',
+      `Provider key rotated: ${modal.provider.slug}. ${modal.affectedAliases} aliases synced.`,
+      'ok',
+      { kind: 'provider-rotate', id: modal.provider.id },
     );
     close();
   };
   const submitDanger = async () => {
     if (modal.kind !== 'danger' || confirmation !== modal.confirmText) return;
-    await run(modal.action, 'Action completed.', 'warn');
+    await run(modal.action, modal.success, 'warn', modal.pending);
     close();
   };
 
@@ -1156,7 +1443,8 @@ function Modal({
               <p>
                 This replaces the stored credential for <strong>{modal.provider.slug}</strong> and
                 syncs <strong>{modal.affectedAliases}</strong> affected aliases. Existing traffic
-                may fail if the new key is invalid.
+                may fail if the new key is invalid. To recover, rotate back to a working key and run
+                Check health.
               </p>
               <label className="field">
                 <span>New provider API key *</span>
@@ -1193,7 +1481,7 @@ function Modal({
               onClick={modal.kind === 'rotate' ? submitRotate : submitDanger}
               disabled={modal.kind === 'danger' && confirmation !== modal.confirmText}
             >
-              {modal.kind === 'rotate' ? 'Rotate + Sync' : modal.label}
+              {modal.kind === 'rotate' ? 'Rotate key and sync aliases' : modal.label}
             </Button>
           )}
         </div>
@@ -1373,7 +1661,7 @@ function TableToolbar({
             aria-label={`${title} search`}
             value={filters.q}
             onChange={(event) => setFilters({ ...filters, q: event.target.value })}
-            placeholder="Search..."
+            placeholder={`Search ${title.toLowerCase()}`}
           />
         </label>
         <select
@@ -1395,9 +1683,11 @@ function TableToolbar({
 function SectionErrors({
   errors,
   sections,
+  onRetry,
 }: {
   errors: Partial<Record<SectionKey, string>>;
   sections: SectionKey[];
+  onRetry?: () => void;
 }) {
   const entries = sections
     .map((section) => [section, errors[section]] as const)
@@ -1407,10 +1697,18 @@ function SectionErrors({
 
   return (
     <div className="inline-error">
-      <strong>Some data could not be loaded.</strong>
+      <strong>Some dashboard data failed to load.</strong>
+      <p>Check the admin API, then retry the failed section.</p>
       {entries.map(([section, message]) => (
-        <div key={section}>
-          {section}: {message}
+        <div className="error-row" key={section}>
+          <span>
+            <strong>{titleCase(section)}</strong>: {message}
+          </span>
+          {onRetry && (
+            <Button tone="utility" onClick={onRetry}>
+              Retry section
+            </Button>
+          )}
         </div>
       ))}
     </div>
@@ -1435,14 +1733,16 @@ function Panel({
   subtitle,
   children,
   className = '',
+  quiet,
 }: {
   title?: string;
   subtitle?: string;
   children: ReactNode;
   className?: string;
+  quiet?: boolean;
 }) {
   return (
-    <section className={`panel ${className}`}>
+    <section className={`panel ${quiet ? 'quiet' : ''} ${className}`}>
       {title && <h3>{title}</h3>}
       {subtitle && <p className="sub">{subtitle}</p>}
       {children}
@@ -1466,6 +1766,143 @@ function Metric({
         <div className="label">{label}</div>
       </div>
       {badge}
+    </div>
+  );
+}
+
+function DashboardStatusBadge({
+  token,
+  loading,
+  hasLoaded,
+  hasFailures,
+}: {
+  token: string;
+  loading: boolean;
+  hasLoaded: boolean;
+  hasFailures: boolean;
+}) {
+  if (loading) return <Badge tone="info">Loading dashboard</Badge>;
+  if (!token.trim()) return <Badge tone="warn">Token required</Badge>;
+  if (hasFailures) return <Badge tone="warn">Some data failed</Badge>;
+  if (hasLoaded) return <Badge tone="ok">Current</Badge>;
+  return <Badge tone="info">Token loaded</Badge>;
+}
+
+function ToastView({ toast, close }: { toast: Exclude<Toast, null>; close: () => void }) {
+  return (
+    <div className={`toast ${toast.tone}`} role={toast.tone === 'danger' ? 'alert' : 'status'}>
+      <span>{toast.message}</span>
+      {toast.persistent && (
+        <button className="toast-close" onClick={close} aria-label="Dismiss notification">
+          Dismiss
+        </button>
+      )}
+    </div>
+  );
+}
+
+function PendingBadge({ children }: { children: ReactNode }) {
+  return (
+    <Badge tone="info">
+      <Loader2 className="spin tiny" />
+      {children}
+    </Badge>
+  );
+}
+
+function ActionMenu({
+  label,
+  items,
+}: {
+  label: string;
+  items: Array<{ label: string; onClick: () => void; danger?: boolean }>;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="action-menu">
+      <Button
+        tone="utility"
+        icon={<MoreHorizontal />}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="visually-hidden">{label}</span>
+      </Button>
+      {open && (
+        <div className="action-menu-popover" role="menu">
+          {items.map((item) => (
+            <button
+              key={item.label}
+              className={item.danger ? 'danger-item' : ''}
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                item.onClick();
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RelativeTime({
+  value,
+  empty = 'Never',
+}: {
+  value?: string | Date | null;
+  empty?: string;
+}) {
+  if (!value) return <span className="hint">{empty}</span>;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return <span className="hint">{empty}</span>;
+  return (
+    <span title={formatDate(date)}>
+      {formatRelativeDate(date)}
+      <span className="hint block">{formatDate(date)}</span>
+    </span>
+  );
+}
+
+function OneTimeSecretPanel({
+  value,
+  copied,
+  setCopied,
+  notify,
+  dismiss,
+}: {
+  value: string;
+  copied: boolean;
+  setCopied: (copied: boolean) => void;
+  notify: (message: string, tone?: Tone) => void;
+  dismiss: () => void;
+}) {
+  const copy = async () => {
+    await navigator.clipboard.writeText(value);
+    setCopied(true);
+    notify('Developer key copied.');
+    window.setTimeout(() => setCopied(false), 1800);
+  };
+
+  return (
+    <div className="secret one-time-secret">
+      <div>
+        <strong>Developer key created</strong>
+        <p>Copy this key now. It will not be shown again.</p>
+      </div>
+      <code>{value}</code>
+      <div className="actions">
+        <Button tone="primary" icon={copied ? <Check /> : <Copy />} onClick={copy}>
+          {copied ? 'Copied' : 'Copy key'}
+        </Button>
+        <Button tone="utility" onClick={dismiss}>
+          I saved this key
+        </Button>
+      </div>
     </div>
   );
 }
@@ -1501,15 +1938,17 @@ function Button({
   children,
   icon,
   tone,
+  loading,
   ...props
 }: {
   children: ReactNode;
   icon?: ReactNode;
-  tone?: 'primary' | 'danger';
+  tone?: 'primary' | 'secondary' | 'utility' | 'danger' | 'danger-ghost';
+  loading?: boolean;
 } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button className={tone || 'secondary'} {...props}>
-      {icon}
+      {loading ? <Loader2 className="spin" /> : icon}
       {children}
     </button>
   );
@@ -1533,6 +1972,24 @@ function providerBadge(provider: Provider) {
   if (provider.healthStatus === 'healthy') return <Badge tone="ok">Healthy</Badge>;
   if (provider.healthStatus === 'unhealthy') return <Badge tone="danger">Unhealthy</Badge>;
   return <Badge tone="warn">Unchecked</Badge>;
+}
+
+function sectionTone(status: LoadStatus): Tone {
+  if (status === 'current') return 'ok';
+  if (status === 'stale' || status === 'loading') return 'warn';
+  if (status === 'failed') return 'danger';
+  return 'off';
+}
+
+function sectionLabel(status: LoadStatus) {
+  if (status === 'idle') return 'Not loaded';
+  if (status === 'loading') return 'Loading';
+  return titleCase(status);
+}
+
+function hasSectionData(section: SectionKey, data: DashboardData) {
+  if (section === 'usage') return Boolean(data.usage);
+  return data[section].length > 0;
 }
 
 function affectedAliases(aliases: ModelAlias[], providerId: string) {
@@ -1607,6 +2064,22 @@ function formatDate(value?: string | Date | null) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
     date,
   );
+}
+
+function formatRelativeDate(value?: string | Date | null) {
+  if (!value) return 'Never';
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Never';
+  const diff = Date.now() - date.getTime();
+  const abs = Math.abs(diff);
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+  if (abs < minute) return 'Just now';
+  if (abs < hour) return rtf.format(Math.round(-diff / minute), 'minute');
+  if (abs < day) return rtf.format(Math.round(-diff / hour), 'hour');
+  return rtf.format(Math.round(-diff / day), 'day');
 }
 
 function formatNumber(value: number) {

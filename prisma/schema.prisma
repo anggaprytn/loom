@@ -156,3 +156,36 @@ model ModelAlias {
   @@index([providerId])
   @@index([enabled])
 }
+
+model AdminOperation {
+  id          String    @id @default(cuid())
+  type        String
+  targetType  String
+  targetId    String
+  targetLabel String?
+  status      String    @default("running")
+  result      Json?
+  error       Json?
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+
+  @@index([status])
+  @@index([targetType, targetId])
+  @@index([startedAt])
+}
+
+model AuditEvent {
+  id          String   @id @default(cuid())
+  action      String
+  targetType  String
+  targetId    String?
+  targetLabel String?
+  result      String
+  message     String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([action])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+}

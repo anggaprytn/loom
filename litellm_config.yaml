@@ -1,62 +1,11 @@
 # LiteLLM public/front-door proxy configuration.
-# Phase 2: users call LiteLLM with virtual keys created by the control plane via
-# LiteLLM's admin API. LiteLLM is the request-time auth, model, budget, and
-# spend-tracking authority.
 #
-# 9Router stays private. The ROUTER_* env vars should point to an
-# OpenAI-compatible endpoint reachable only by LiteLLM on the Docker/private
-# network. ROUTER_* is preferred; NINE_ROUTER_* remains documented for older
-# operators, but LiteLLM reads ROUTER_* directly here.
+# Runtime model aliases are owned by the admin provider registry and synced into
+# LiteLLM through /admin/model-aliases/*/sync. Do not define production aliases
+# such as code-premium here: static config entries shadow DB-backed aliases and
+# prevent operator sync/rotation from changing live routing.
 
-model_list:
-  - model_name: code-premium
-    litellm_params:
-      model: os.environ/ROUTER_PREMIUM_MODEL
-      api_base: os.environ/ROUTER_BASE_URL
-      api_key: os.environ/ROUTER_API_KEY
-
-  - model_name: code-balanced
-    litellm_params:
-      model: os.environ/ROUTER_BALANCED_MODEL
-      api_base: os.environ/ROUTER_BASE_URL
-      api_key: os.environ/ROUTER_API_KEY
-
-  - model_name: code-fast
-    litellm_params:
-      model: os.environ/ROUTER_FAST_MODEL
-      api_base: os.environ/ROUTER_BASE_URL
-      api_key: os.environ/ROUTER_API_KEY
-
-  - model_name: code-fallback
-    litellm_params:
-      model: os.environ/ROUTER_FALLBACK_MODEL
-      api_base: os.environ/ROUTER_BASE_URL
-      api_key: os.environ/ROUTER_API_KEY
-
-  - model_name: agent-premium
-    litellm_params:
-      model: os.environ/ROUTER_AGENT_PREMIUM_MODEL
-      api_base: os.environ/ROUTER_BASE_URL
-      api_key: os.environ/ROUTER_API_KEY
-
-  - model_name: agent-cheap
-    litellm_params:
-      model: os.environ/ROUTER_AGENT_CHEAP_MODEL
-      api_base: os.environ/ROUTER_BASE_URL
-      api_key: os.environ/ROUTER_API_KEY
-
-  # Backward-compatible aliases from Phase 1 docs.
-  - model_name: codex-default
-    litellm_params:
-      model: os.environ/ROUTER_BALANCED_MODEL
-      api_base: os.environ/ROUTER_BASE_URL
-      api_key: os.environ/ROUTER_API_KEY
-
-  - model_name: codex-premium
-    litellm_params:
-      model: os.environ/ROUTER_PREMIUM_MODEL
-      api_base: os.environ/ROUTER_BASE_URL
-      api_key: os.environ/ROUTER_API_KEY
+model_list: []
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
@@ -69,7 +18,3 @@ litellm_settings:
   set_verbose: false
   success_callback: ['proxy_base_cost_tracking']
   failure_callback: ['proxy_base_cost_tracking']
-  fallbacks:
-    - code-premium: ['code-balanced', 'code-fallback']
-    - code-balanced: ['code-fallback']
-    - agent-premium: ['agent-cheap']
