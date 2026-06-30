@@ -39,6 +39,7 @@ type ActivityItem = { id: string; at: Date; tone: Tone; label: string };
 type LoadStatus = 'idle' | 'loading' | 'current' | 'stale' | 'failed';
 type SectionState = { status: LoadStatus; lastLoadedAt: Date | null; error?: string };
 type SectionStates = Record<SectionKey, SectionState>;
+type UsageTab = 'users' | 'teams' | 'models' | 'attribution';
 type PendingAction =
   | { kind: 'provider-health'; id: string }
   | { kind: 'provider-rotate'; id: string }
@@ -330,14 +331,6 @@ export function App() {
               hasLoaded={hasLoaded}
               hasFailures={hasFailures}
             />
-            <input
-              aria-label="Admin token"
-              type="password"
-              value={token}
-              onChange={(event) => updateToken(event.target.value)}
-              placeholder="ADMIN_TOKEN"
-              autoComplete="current-password"
-            />
             <Button
               tone="primary"
               icon={<RefreshCw />}
@@ -347,9 +340,7 @@ export function App() {
             >
               {loading ? 'Loading dashboard' : hasLoaded ? 'Reload dashboard' : 'Load dashboard'}
             </Button>
-            <Button tone="utility" icon={<LogOut />} onClick={clearSession}>
-              Clear token
-            </Button>
+            <AdminSessionMenu token={token} updateToken={updateToken} lastRefresh={lastRefresh} />
           </div>
         </header>
 
@@ -457,6 +448,14 @@ function Overview({
         ? 'Unchecked'
         : 'No providers configured';
   const failedSections = Object.entries(errors);
+  const readiness = getGatewayReadiness({
+    failedSections: failedSections.length,
+    enabledProviders,
+    enabledAliases,
+    activeKeys,
+    unhealthy,
+    lastRefresh,
+  });
 
   return (
     <>
@@ -478,6 +477,16 @@ function Overview({
           ))}
         </div>
       )}
+      <section className="hero-status">
+        <div>
+          <Badge tone={readiness.tone}>{readiness.badge}</Badge>
+          <h3>{readiness.title}</h3>
+          <p>{readiness.description}</p>
+        </div>
+        <Button tone="primary" icon={<RefreshCw />} onClick={onRetry} disabled={loading}>
+          {loading ? 'Loading dashboard' : readiness.action}
+        </Button>
+      </section>
       <div className="grid three">
         <Metric
           label="Enabled providers"
@@ -688,25 +697,9 @@ function Keys({
         subtitle="Developer keys are LiteLLM virtual keys. Each key belongs to one developer and should be stored in their secret manager."
       >
         <div className="flow-grid">
-          <form className="form-grid flow-card" onSubmit={createUser}>
-            <div className="flow-heading full">
-              <Badge tone="info">Step 1</Badge>
-              <strong>Create developer</strong>
-              <span>Use this only when the developer does not already exist.</span>
-            </div>
-            <Field label="Email" name="email" required placeholder="dev@example.com" />
-            <Field label="Name" name="name" required placeholder="Dev Example" />
-            <Field label="Team Slug" name="teamSlug" placeholder="engineering" />
-            <Field label="Team Name" name="teamName" placeholder="Engineering" />
-            <div className="actions full">
-              <Button tone="secondary" icon={<UserPlus />} type="submit">
-                Create developer
-              </Button>
-            </div>
-          </form>
           <form className="form-grid flow-card primary-flow" onSubmit={createKey}>
             <div className="flow-heading full">
-              <Badge tone="info">Step 2</Badge>
+              <Badge tone="info">Primary</Badge>
               <strong>Issue access</strong>
               <span>Select a developer, choose allowed aliases, then issue the key.</span>
             </div>
@@ -751,6 +744,26 @@ function Keys({
               </Button>
             </div>
           </form>
+          <details className="setup-disclosure flow-card" open={!data.users.length}>
+            <summary>
+              <UserPlus />
+              <span>Create developer</span>
+            </summary>
+            <form className="form-grid" onSubmit={createUser}>
+              <div className="flow-heading full">
+                <span>Use this only when the developer does not already exist.</span>
+              </div>
+              <Field label="Email" name="email" required placeholder="dev@example.com" />
+              <Field label="Name" name="name" required placeholder="Dev Example" />
+              <Field label="Team Slug" name="teamSlug" placeholder="engineering" />
+              <Field label="Team Name" name="teamName" placeholder="Engineering" />
+              <div className="actions full">
+                <Button tone="secondary" icon={<UserPlus />} type="submit">
+                  Create developer
+                </Button>
+              </div>
+            </form>
+          </details>
         </div>
       </Panel>
       <Panel className={`stack ${newKey ? 'muted-panel' : ''}`}>
@@ -924,46 +937,42 @@ function Providers({
   return (
     <>
       <SectionErrors errors={errors} sections={['providers', 'aliases']} onRetry={onRetry} />
-      <div className="grid two">
-        <Panel
-          title="Add Provider"
-          subtitle="Use an OpenAI-compatible /v1 endpoint. Provider secrets are encrypted at rest."
-        >
-          <form className="form-grid" onSubmit={createProvider}>
-            <Field label="Slug" name="slug" required placeholder="9router" />
-            <Field label="Name" name="name" required placeholder="9Router Local" />
-            <Field
-              label="Base URL"
-              name="baseUrl"
-              required
-              placeholder="http://9router:20128/v1"
-              full
-            />
-            <Field
-              label="API Key"
-              name="apiKey"
-              type="password"
-              placeholder="provider token if required"
-              full
-            />
-            <div className="actions full">
-              <Button tone="primary" icon={<Server />} type="submit">
-                Create Provider
-              </Button>
-            </div>
-          </form>
-        </Panel>
-        <Panel
-          title="Provider Rules"
-          subtitle="Keep upstreams private and stable. Developers should never call them directly."
-          quiet
-        >
-          <div className="callout warn">
-            Browser sessions, shared personal subscriptions, and cookies are not valid provider
-            credentials. Use OpenAI-compatible APIs, local 9Router, or local model servers.
+      <details className="setup-disclosure panel" open={!data.providers.length}>
+        <summary>
+          <Server />
+          <span>Add provider</span>
+        </summary>
+        <p className="sub">
+          Use an OpenAI-compatible /v1 endpoint. Provider secrets are encrypted at rest.
+        </p>
+        <form className="form-grid" onSubmit={createProvider}>
+          <Field label="Slug" name="slug" required placeholder="9router" />
+          <Field label="Name" name="name" required placeholder="9Router Local" />
+          <Field
+            label="Base URL"
+            name="baseUrl"
+            required
+            placeholder="http://9router:20128/v1"
+            full
+          />
+          <Field
+            label="API Key"
+            name="apiKey"
+            type="password"
+            placeholder="provider token if required"
+            full
+          />
+          <div className="actions full">
+            <Button tone="primary" icon={<Server />} type="submit">
+              Create Provider
+            </Button>
           </div>
-        </Panel>
-      </div>
+        </form>
+        <div className="notice stack">
+          Use API credentials, local 9Router, or local model servers. Do not use browser sessions or
+          shared personal subscriptions as provider credentials.
+        </div>
+      </details>
       <Panel className="stack">
         <TableToolbar
           title="Providers"
@@ -1154,53 +1163,49 @@ function Aliases({
   return (
     <>
       <SectionErrors errors={errors} sections={['aliases', 'providers']} onRetry={onRetry} />
-      <div className="grid two">
-        <Panel
-          title="Create Model Alias"
-          subtitle="Aliases are stable public names developers use from Codex, Cursor, Cline, and automation."
-        >
-          <form className="form-grid" onSubmit={createAlias}>
-            <Field label="Alias" name="alias" required defaultValue="code-premium" />
-            <div className="field">
-              <span>Provider *</span>
-              <SearchableSelect
-                name="providerId"
-                placeholder={data.providers.length ? 'Select provider' : 'Create a provider first'}
-                options={data.providers
-                  .filter((provider) => provider.enabled)
-                  .map((provider) => ({
-                    value: provider.id,
-                    label: provider.slug,
-                    description: provider.name,
-                  }))}
-              />
-            </div>
-            <Field
-              label="Upstream Model"
-              name="upstreamModel"
-              required
-              defaultValue="openai/gemini-2.5-pro"
-              full
+      <details className="setup-disclosure panel" open={!data.aliases.length}>
+        <summary>
+          <Route />
+          <span>Create model alias</span>
+        </summary>
+        <p className="sub">
+          Aliases are stable public names developers use from Codex, Cursor, Cline, and automation.
+        </p>
+        <form className="form-grid" onSubmit={createAlias}>
+          <Field label="Alias" name="alias" required defaultValue="code-premium" />
+          <div className="field">
+            <span>Provider *</span>
+            <SearchableSelect
+              name="providerId"
+              placeholder={data.providers.length ? 'Select provider' : 'Create a provider first'}
+              options={data.providers
+                .filter((provider) => provider.enabled)
+                .map((provider) => ({
+                  value: provider.id,
+                  label: provider.slug,
+                  description: provider.name,
+                }))}
             />
-            <div className="actions full">
-              <Button tone="primary" icon={<Route />} type="submit">
-                Create and sync alias
-              </Button>
-            </div>
-          </form>
-        </Panel>
-        <Panel
-          title="Routing Preview"
-          subtitle="Developers see aliases. Operators control provider and upstream model mapping."
-          quiet
-        >
-          <div className="callout info">
-            <code>
-              Codex -&gt; LiteLLM key -&gt; code-premium -&gt; provider -&gt; upstream model
-            </code>
           </div>
-        </Panel>
-      </div>
+          <Field
+            label="Upstream Model"
+            name="upstreamModel"
+            required
+            defaultValue="openai/gemini-2.5-pro"
+            full
+          />
+          <div className="actions full">
+            <Button tone="primary" icon={<Route />} type="submit">
+              Create and sync alias
+            </Button>
+          </div>
+        </form>
+        <div className="notice stack">
+          <code>
+            Codex -&gt; LiteLLM key -&gt; code-premium -&gt; provider -&gt; upstream model
+          </code>
+        </div>
+      </details>
       <Panel className="stack">
         <TableToolbar
           title="Model Aliases"
@@ -1329,6 +1334,7 @@ function Usage({
   const [loading, setLoading] = useState(false);
   const [preset, setPreset] = useState('last7');
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<UsageTab>('users');
   useEffect(() => setUsage(data.usage), [data.usage]);
   const topUsersByCost = usage?.topUsersByCost?.length ? usage.topUsersByCost : usage?.byUser || [];
   const topUsersByTokens = usage?.topUsersByTokens?.length
@@ -1338,6 +1344,7 @@ function Usage({
       );
   const selectedUser =
     (usage?.byUser || []).find((row) => usageUserId(row) === selectedUserId) || null;
+  const unknownRequests = usage?.unknownAttribution?.requests || 0;
 
   const applyPreset = (value: string) => {
     setPreset(value);
@@ -1386,118 +1393,122 @@ function Usage({
         title="Usage Snapshot"
         subtitle={`Source: ${usage?.source || 'LiteLLM spend logs'}`}
       >
-        <form className="usage-filters" onSubmit={refreshUsage}>
-          <div className="field">
-            <span>Source</span>
-            <SearchableSelect
-              value={source}
-              onChange={(value) => setSource(value as 'litellm' | 'local')}
-              options={[
-                { value: 'litellm', label: 'LiteLLM spend logs' },
-                { value: 'local', label: 'Local ingest records' },
-              ]}
-            />
-          </div>
-          <div className="field">
-            <span>Range</span>
-            <SearchableSelect
-              value={preset}
-              onChange={applyPreset}
-              options={[
-                { value: 'today', label: 'Today' },
-                { value: 'yesterday', label: 'Yesterday' },
-                { value: 'last7', label: 'Last 7 days' },
-                { value: 'thisMonth', label: 'This month' },
-                { value: 'lastMonth', label: 'Last month' },
-                { value: 'custom', label: 'Custom range' },
-              ]}
-            />
-          </div>
-          <label className="field">
-            <span>From</span>
-            <input
-              type="date"
-              value={from}
-              onChange={(event) => {
-                setPreset('custom');
-                setFrom(event.target.value);
-              }}
-            />
-          </label>
-          <label className="field">
-            <span>To</span>
-            <input
-              type="date"
-              value={to}
-              onChange={(event) => {
-                setPreset('custom');
-                setTo(event.target.value);
-              }}
-            />
-          </label>
-          <div className="actions">
-            <Button
-              type="submit"
-              icon={<RefreshCw />}
-              disabled={loading}
-              loading={pendingAction?.kind === 'usage-refresh'}
-            >
-              {loading ? 'Refreshing usage' : 'Refresh usage'}
-            </Button>
+        <form onSubmit={refreshUsage}>
+          <div className="toolbar-row">
+            <div>
+              <UsageStatus usage={usage} source={source} from={from} to={to} />
+              {unknownRequests > 0 && (
+                <div className="notice warn">
+                  {unknownRequests} unattributed request{unknownRequests === 1 ? '' : 's'} · Review
+                  attribution
+                </div>
+              )}
+            </div>
+            <div className="actions">
+              <details className="filter-disclosure">
+                <summary>Filters</summary>
+                <div className="filter-popover">
+                  <div className="field">
+                    <span>Source</span>
+                    <SearchableSelect
+                      value={source}
+                      onChange={(value) => setSource(value as 'litellm' | 'local')}
+                      options={[
+                        { value: 'litellm', label: 'LiteLLM spend logs' },
+                        { value: 'local', label: 'Local ingest records' },
+                      ]}
+                    />
+                  </div>
+                  <div className="field">
+                    <span>Range</span>
+                    <SearchableSelect
+                      value={preset}
+                      onChange={applyPreset}
+                      options={[
+                        { value: 'today', label: 'Today' },
+                        { value: 'yesterday', label: 'Yesterday' },
+                        { value: 'last7', label: 'Last 7 days' },
+                        { value: 'thisMonth', label: 'This month' },
+                        { value: 'lastMonth', label: 'Last month' },
+                        { value: 'custom', label: 'Custom range' },
+                      ]}
+                    />
+                  </div>
+                  <label className="field">
+                    <span>From</span>
+                    <input
+                      type="date"
+                      value={from}
+                      onChange={(event) => {
+                        setPreset('custom');
+                        setFrom(event.target.value);
+                      }}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>To</span>
+                    <input
+                      type="date"
+                      value={to}
+                      onChange={(event) => {
+                        setPreset('custom');
+                        setTo(event.target.value);
+                      }}
+                    />
+                  </label>
+                </div>
+              </details>
+              <UsageExportMenu usage={usage} />
+              {pendingAction?.kind === 'usage-refresh' && (
+                <PendingBadge>Refreshing...</PendingBadge>
+              )}
+              <Button
+                type="submit"
+                icon={<RefreshCw />}
+                disabled={loading}
+                loading={pendingAction?.kind === 'usage-refresh'}
+              >
+                {loading ? 'Refreshing usage' : 'Refresh usage'}
+              </Button>
+            </div>
           </div>
         </form>
-        {pendingAction?.kind === 'usage-refresh' && <PendingBadge>Refreshing...</PendingBadge>}
-        <UsageStatus usage={usage} source={source} from={from} to={to} />
-        <div className="actions">
-          <Button
-            type="button"
-            tone="utility"
-            icon={<Copy />}
-            onClick={() => exportUsageCsv('usage-by-user.csv', usage?.byUser || [])}
-          >
-            Export users CSV
-          </Button>
-          <Button
-            type="button"
-            tone="utility"
-            icon={<Copy />}
-            onClick={() => exportUsageCsv('usage-by-team.csv', usage?.byTeam || [])}
-          >
-            Export teams CSV
-          </Button>
-          <Button
-            type="button"
-            tone="utility"
-            icon={<Copy />}
-            onClick={() =>
-              exportUsageCsv('usage-daily-rollup.csv', usage?.rawDailyRollup || usage?.byDay || [])
-            }
-          >
-            Export daily CSV
-          </Button>
-        </div>
-        {usage?.unknownAttribution && (
-          <div className="callout warn">
-            <strong>Unknown attribution detected.</strong> {usage.unknownAttribution.requests}{' '}
-            requests could not be mapped to a developer key, user, or team.
-          </div>
-        )}
-        <div className="grid two">
+        <Tabs
+          active={activeTab}
+          onChange={setActiveTab}
+          items={[
+            { id: 'users', label: 'Users' },
+            { id: 'teams', label: 'Teams' },
+            { id: 'models', label: 'Models' },
+            { id: 'attribution', label: 'Attribution' },
+          ]}
+        />
+        {activeTab === 'users' && (
           <UserUsageTable
             title="Top users by cost"
             rows={topUsersByCost}
             onSelect={(row) => setSelectedUserId(usageUserId(row))}
           />
-          <UserUsageTable
-            title="Top users by tokens"
-            rows={topUsersByTokens}
-            onSelect={(row) => setSelectedUserId(usageUserId(row))}
-          />
-        </div>
-        <div className="grid two">
-          <UsageTable title="By Team" rows={usage?.byTeam || []} rowKey="team" />
-          <UsageTable title="By Model" rows={usage?.byModel || []} rowKey="model" />
-        </div>
+        )}
+        {activeTab === 'teams' && (
+          <UsageTable title="By team" rows={usage?.byTeam || []} rowKey="team" />
+        )}
+        {activeTab === 'models' && (
+          <>
+            <UsageTable title="By model" rows={usage?.byModel || []} rowKey="model" />
+            <details className="setup-disclosure stack">
+              <summary>Show top users by tokens</summary>
+              <UserUsageTable
+                title="Top users by tokens"
+                rows={topUsersByTokens}
+                onSelect={(row) => setSelectedUserId(usageUserId(row))}
+              />
+            </details>
+          </>
+        )}
+        {activeTab === 'attribution' && (
+          <AttributionPanel usage={usage} unknownRequests={unknownRequests} />
+        )}
         {selectedUser && (
           <UserUsageDetail row={selectedUser} onClose={() => setSelectedUserId(null)} />
         )}
@@ -1513,33 +1524,67 @@ function SettingsView({
   clearSession: () => void;
   notify: (message: string, tone?: Tone) => void;
 }) {
+  const [confirmation, setConfirmation] = useState('');
   const env =
     'OPENAI_BASE_URL=https://llm.apps.anggaprytn.com/v1\nOPENAI_API_KEY=<personal_litellm_key>\nOPENAI_MODEL=code-premium';
   return (
-    <div className="grid two">
-      <Panel title="Codex Configuration" subtitle="Give each developer their own developer key.">
-        <pre className="callout info mono">{env}</pre>
-      </Panel>
-      <Panel
-        title="Security Baseline"
-        subtitle="This dashboard is admin-only and should remain behind VPN or access control."
-      >
-        <div className="actions">
+    <>
+      <div className="grid two">
+        <Panel title="Codex Configuration" subtitle="Give each developer their own developer key.">
+          <pre className="callout info mono">{env}</pre>
+          <div className="actions">
+            <Button
+              tone="utility"
+              icon={<Copy />}
+              onClick={() =>
+                navigator.clipboard.writeText(env).then(() => notify('Codex config copied.'))
+              }
+            >
+              Copy Codex config
+            </Button>
+          </div>
+        </Panel>
+        <Panel
+          title="Security Baseline"
+          subtitle="This dashboard is admin-only and should remain behind VPN or access control."
+          quiet
+        >
+          <div className="notice">
+            Keep admin access behind private network controls. Give developers personal keys instead
+            of shared admin credentials.
+          </div>
+        </Panel>
+      </div>
+      <Panel className="stack danger-zone" title="Danger Zone" subtitle="Session-only controls.">
+        <div className="danger-zone-grid">
+          <div>
+            <strong>Clear admin token</strong>
+            <p className="hint">
+              Removes the saved token and clears loaded dashboard data from this browser.
+            </p>
+          </div>
+          <label className="field">
+            <span>Type CLEAR to confirm</span>
+            <input
+              value={confirmation}
+              onChange={(event) => setConfirmation(event.target.value)}
+              placeholder="CLEAR"
+            />
+          </label>
           <Button
-            tone="utility"
-            icon={<Copy />}
-            onClick={() =>
-              navigator.clipboard.writeText(env).then(() => notify('Codex config copied.'))
-            }
+            tone="danger"
+            icon={<LogOut />}
+            disabled={confirmation !== 'CLEAR'}
+            onClick={() => {
+              clearSession();
+              setConfirmation('');
+            }}
           >
-            Copy Codex config
-          </Button>
-          <Button tone="utility" icon={<LogOut />} onClick={clearSession}>
             Clear token
           </Button>
         </div>
       </Panel>
-    </div>
+    </>
   );
 }
 
@@ -1642,6 +1687,99 @@ function Modal({
   );
 }
 
+function Tabs<T extends string>({
+  active,
+  onChange,
+  items,
+}: {
+  active: T;
+  onChange: (value: T) => void;
+  items: Array<{ id: T; label: string }>;
+}) {
+  return (
+    <div className="tabs" role="tablist">
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          role="tab"
+          aria-selected={active === item.id}
+          onClick={() => onChange(item.id)}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function UsageExportMenu({ usage }: { usage: UsageResponse | null }) {
+  return (
+    <details className="export-menu">
+      <summary>
+        <Copy />
+        Export
+      </summary>
+      <div className="action-menu-popover">
+        <button
+          type="button"
+          onClick={() => exportUsageCsv('usage-by-user.csv', usage?.byUser || [])}
+        >
+          Users CSV
+        </button>
+        <button
+          type="button"
+          onClick={() => exportUsageCsv('usage-by-team.csv', usage?.byTeam || [])}
+        >
+          Teams CSV
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            exportUsageCsv('usage-daily-rollup.csv', usage?.rawDailyRollup || usage?.byDay || [])
+          }
+        >
+          Daily CSV
+        </button>
+      </div>
+    </details>
+  );
+}
+
+function AttributionPanel({
+  usage,
+  unknownRequests,
+}: {
+  usage: UsageResponse | null;
+  unknownRequests: number;
+}) {
+  const neverUsed = usage?.inactive?.keysNeverUsed?.length || 0;
+  const quietUsers = usage?.inactive?.usersWithNoUsage?.length || 0;
+  return (
+    <div className="grid three">
+      <Metric
+        label="Unattributed requests"
+        value={unknownRequests}
+        badge={
+          <Badge tone={unknownRequests ? 'warn' : 'ok'}>
+            {unknownRequests ? 'Review' : 'Clear'}
+          </Badge>
+        }
+      />
+      <Metric
+        label="Keys never used"
+        value={neverUsed}
+        badge={<Badge tone={neverUsed ? 'info' : 'ok'}>{neverUsed ? 'Check' : 'Clear'}</Badge>}
+      />
+      <Metric
+        label="Users with no usage"
+        value={quietUsers}
+        badge={<Badge tone={quietUsers ? 'info' : 'ok'}>{quietUsers ? 'Check' : 'Clear'}</Badge>}
+      />
+    </div>
+  );
+}
+
 function UsageStatus({
   usage,
   source,
@@ -1655,24 +1793,24 @@ function UsageStatus({
 }) {
   if (!usage) {
     return (
-      <div className="callout warn">
-        <strong>Usage is not loaded.</strong> Refresh usage to check spend logs and attribution.
+      <div className="notice warn">
+        Usage is not loaded · Refresh usage to check spend logs and attribution.
       </div>
     );
   }
   if (!usage.totals.requests) {
     return (
-      <div className="callout info">
-        <strong>No usage in selected range.</strong> Source is{' '}
-        {source === 'litellm' ? 'LiteLLM spend logs' : 'local ingest records'}.
+      <div className="notice">
+        No usage in selected range ·{' '}
+        {source === 'litellm' ? 'LiteLLM spend logs' : 'Local ingest records'}
         {from || to ? ' Adjust the date range if this looks unexpected.' : ''}
       </div>
     );
   }
   return (
-    <div className="callout info">
-      <strong>Usage loaded.</strong> Showing {usage.totals.requests} requests from{' '}
-      {source === 'litellm' ? 'LiteLLM spend logs' : 'local ingest records'}.
+    <div className="notice">
+      {usage.totals.requests} requests loaded ·{' '}
+      {source === 'litellm' ? 'LiteLLM spend logs' : 'Local ingest records'}
     </div>
   );
 }
@@ -1864,6 +2002,7 @@ function SearchableSelect({
   const [internalValue, setInternalValue] = useState(defaultValue);
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   const selectedValue = value ?? internalValue;
   const selected = options.find((option) => option.value === selectedValue);
   const filtered = options.filter((option) =>
@@ -1871,6 +2010,22 @@ function SearchableSelect({
       .toLowerCase()
       .includes(query.toLowerCase()),
   );
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [open]);
 
   const choose = (nextValue: string) => {
     if (value === undefined) setInternalValue(nextValue);
@@ -1880,10 +2035,7 @@ function SearchableSelect({
   };
 
   return (
-    <div
-      className={`searchable-select ${className}`}
-      onBlur={() => window.setTimeout(() => setOpen(false), 120)}
-    >
+    <div className={`searchable-select ${className}`} ref={rootRef}>
       {name && <input type="hidden" name={name} value={selectedValue} />}
       <button
         type="button"
@@ -1916,7 +2068,6 @@ function SearchableSelect({
                   key={option.value}
                   role="option"
                   aria-selected={option.value === selectedValue}
-                  onMouseDown={(event) => event.preventDefault()}
                   onClick={() => choose(option.value)}
                 >
                   <span>{option.label}</span>
@@ -2191,6 +2342,41 @@ function DashboardStatusBadge({
   return <Badge tone="info">Token loaded</Badge>;
 }
 
+function AdminSessionMenu({
+  token,
+  updateToken,
+  lastRefresh,
+}: {
+  token: string;
+  updateToken: (value: string) => void;
+  lastRefresh: Date | null;
+}) {
+  return (
+    <details className="session-details">
+      <summary>
+        <MoreHorizontal />
+        <span className="visually-hidden">Admin session</span>
+      </summary>
+      <div className="session-popover">
+        <label className="field">
+          <span>Admin token</span>
+          <input
+            aria-label="Admin token"
+            type="password"
+            value={token}
+            onChange={(event) => updateToken(event.target.value)}
+            placeholder="ADMIN_TOKEN"
+            autoComplete="current-password"
+          />
+        </label>
+        <div className="meta-line">
+          Last loaded: {lastRefresh ? formatRelativeDate(lastRefresh) : 'Never'}
+        </div>
+      </div>
+    </details>
+  );
+}
+
 function ToastView({ toast, close }: { toast: Exclude<Toast, null>; close: () => void }) {
   return (
     <div className={`toast ${toast.tone}`} role={toast.tone === 'danger' ? 'alert' : 'status'}>
@@ -2457,6 +2643,86 @@ function providerBadge(provider: Provider) {
   if (provider.healthStatus === 'healthy') return <Badge tone="ok">Healthy</Badge>;
   if (provider.healthStatus === 'unhealthy') return <Badge tone="danger">Unhealthy</Badge>;
   return <Badge tone="warn">Unchecked</Badge>;
+}
+
+function getGatewayReadiness({
+  failedSections,
+  enabledProviders,
+  enabledAliases,
+  activeKeys,
+  unhealthy,
+  lastRefresh,
+}: {
+  failedSections: number;
+  enabledProviders: number;
+  enabledAliases: number;
+  activeKeys: number;
+  unhealthy: boolean;
+  lastRefresh: Date | null;
+}) {
+  if (!lastRefresh) {
+    return {
+      tone: 'warn' as Tone,
+      badge: 'Not loaded',
+      title: 'Load dashboard data',
+      description:
+        'Connect with an admin token to check provider health, aliases, keys, and usage.',
+      action: 'Load dashboard',
+    };
+  }
+  if (failedSections) {
+    return {
+      tone: 'warn' as Tone,
+      badge: 'Partial data',
+      title: 'Some dashboard data needs a retry',
+      description: `${failedSections} section${failedSections === 1 ? '' : 's'} failed to load. Loaded sections may still be current.`,
+      action: 'Retry dashboard',
+    };
+  }
+  if (unhealthy) {
+    return {
+      tone: 'danger' as Tone,
+      badge: 'Needs attention',
+      title: 'Provider health is degraded',
+      description: 'Check unhealthy providers before issuing or routing more developer traffic.',
+      action: 'Reload dashboard',
+    };
+  }
+  if (!enabledProviders) {
+    return {
+      tone: 'warn' as Tone,
+      badge: 'Setup incomplete',
+      title: 'Add a provider first',
+      description: 'A provider is required before aliases and developer keys can route traffic.',
+      action: 'Reload dashboard',
+    };
+  }
+  if (!enabledAliases) {
+    return {
+      tone: 'warn' as Tone,
+      badge: 'Setup incomplete',
+      title: 'Create a model alias',
+      description: 'Developers need stable aliases such as code-premium before keys are useful.',
+      action: 'Reload dashboard',
+    };
+  }
+  if (!activeKeys) {
+    return {
+      tone: 'info' as Tone,
+      badge: 'Ready for access',
+      title: 'Issue the first developer key',
+      description:
+        'Providers and aliases are ready. Create personal developer keys to start usage.',
+      action: 'Reload dashboard',
+    };
+  }
+  return {
+    tone: 'ok' as Tone,
+    badge: 'Ready',
+    title: 'Gateway is ready',
+    description: 'Providers, aliases, and active developer keys are available for daily operation.',
+    action: 'Reload dashboard',
+  };
 }
 
 function sectionTone(status: LoadStatus): Tone {
