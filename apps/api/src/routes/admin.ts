@@ -192,6 +192,11 @@ export async function adminRoutes(
 ) {
   app.addHook('onRequest', app.verifyAdmin);
 
+  app.get('/client-config', async () => ({
+    openaiBaseUrl: getOpenAiBaseUrl(env),
+    defaultModel: 'code-premium',
+  }));
+
   app.get('/dashboard/:section', async (request, reply) => {
     const params = z
       .object({ section: z.enum(['users', 'providers', 'aliases', 'keys', 'usage']) })
@@ -1308,6 +1313,27 @@ function serializeError(error: unknown) {
     return { name: error.name, message: error.message };
   }
   return error;
+}
+
+function getOpenAiBaseUrl(env: Env) {
+  if (env.OPENAI_BASE_URL) {
+    return normalizeOpenAiBaseUrl(env.OPENAI_BASE_URL);
+  }
+
+  if (env.PUBLIC_LITELLM_URL) {
+    return normalizeOpenAiBaseUrl(env.PUBLIC_LITELLM_URL);
+  }
+
+  if (env.SERVICE_FQDN_GATEWAY_4000) {
+    return normalizeOpenAiBaseUrl(`https://${env.SERVICE_FQDN_GATEWAY_4000}`);
+  }
+
+  return 'http://localhost:4000/v1';
+}
+
+function normalizeOpenAiBaseUrl(value: string) {
+  const trimmed = value.trim().replace(/\/+$/, '');
+  return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`;
 }
 
 async function startOperation(

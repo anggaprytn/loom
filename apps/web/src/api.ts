@@ -111,6 +111,11 @@ export type DashboardResult = {
   errors: Partial<Record<SectionKey, string>>;
 };
 
+export type ClientConfig = {
+  openaiBaseUrl: string;
+  defaultModel: string;
+};
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -162,6 +167,7 @@ function formatApiError(body: unknown) {
 }
 
 export const api = {
+  getClientConfig: (token: string) => request<ClientConfig>(token, '/client-config'),
   getDashboard: async (token: string): Promise<DashboardResult> => {
     const entries = await Promise.allSettled([
       request<User[]>(token, '/users'),

@@ -21,6 +21,9 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   REDIS_URL: z.string().url().optional(),
   LITELLM_PROXY_URL: z.string().url(),
+  OPENAI_BASE_URL: z.string().url().optional(),
+  PUBLIC_LITELLM_URL: z.string().url().optional(),
+  SERVICE_FQDN_GATEWAY_4000: z.string().min(1).optional(),
   LITELLM_MASTER_KEY: z
     .string()
     .min(8)

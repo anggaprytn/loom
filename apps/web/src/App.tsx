@@ -428,7 +428,9 @@ export function App() {
               onRetry={refresh}
             />
           )}
-          {tab === 'settings' && <SettingsView clearSession={clearSession} notify={notify} />}
+          {tab === 'settings' && (
+            <SettingsView token={token} clearSession={clearSession} notify={notify} />
+          )}
         </main>
       </div>
 
@@ -1545,15 +1547,38 @@ function Usage({
 }
 
 function SettingsView({
+  token,
   clearSession,
   notify,
 }: {
+  token: string;
   clearSession: () => void;
   notify: (message: string, tone?: Tone) => void;
 }) {
   const [confirmation, setConfirmation] = useState('');
-  const env =
-    'OPENAI_BASE_URL=https://llm.example.com/v1\nOPENAI_API_KEY=<personal_litellm_key>\nOPENAI_MODEL=code-premium';
+  const [clientConfig, setClientConfig] = useState({
+    openaiBaseUrl: 'http://localhost:4000/v1',
+    defaultModel: 'code-premium',
+  });
+  const env = `OPENAI_BASE_URL=${clientConfig.openaiBaseUrl}\nOPENAI_API_KEY=<personal_litellm_key>\nOPENAI_MODEL=${clientConfig.defaultModel}`;
+
+  useEffect(() => {
+    let active = true;
+    api
+      .getClientConfig(token)
+      .then((config) => {
+        if (active) setClientConfig(config);
+      })
+      .catch((error) => {
+        if (!active) return;
+        notify(error instanceof Error ? error.message : 'Client config failed to load.', 'warn');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [token]);
+
   return (
     <>
       <div className="grid two">

@@ -48,6 +48,31 @@ describe('dashboard route', () => {
 
     await app.close();
   });
+
+  it('returns runtime client config from OPENAI_BASE_URL', async () => {
+    const app = await buildApp(
+      { ...env, OPENAI_BASE_URL: 'https://llm.company.test/v1' },
+      {} as PrismaLike,
+      new MockLiteLlmAdminClient(),
+    );
+
+    const unauthorized = await app.inject({ method: 'GET', url: '/admin/client-config' });
+    expect(unauthorized.statusCode).toBe(401);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/client-config',
+      headers: { authorization: `Bearer ${env.ADMIN_TOKEN}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      openaiBaseUrl: 'https://llm.company.test/v1',
+      defaultModel: 'code-premium',
+    });
+
+    await app.close();
+  });
 });
 
 class MockLiteLlmAdminClient implements LiteLlmAdminClient {
