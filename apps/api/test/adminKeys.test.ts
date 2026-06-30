@@ -43,12 +43,11 @@ describe('admin key routes', () => {
       payload: {
         userId: 'user-1',
         name: 'codex',
-        models: ['code-premium'],
       },
     });
 
     expect(createResponse.statusCode).toBe(201);
-    expect(litellm.created?.models).toEqual(['code-premium']);
+    expect(litellm.created).not.toHaveProperty('models');
     expect(prisma.apiKey.createPayload?.data).toMatchObject({
       prefix: 'sk',
       litellmKeyAlias: 'tlg_mock_alias',
@@ -105,6 +104,58 @@ describe('admin key routes', () => {
     await app.close();
   });
 
+  it('hydrates key last used from LiteLLM spend logs', async () => {
+    const litellm = new MockLiteLlmAdminClient();
+    litellm.spendLogs = [
+      {
+        timestamp: '2026-06-30T02:00:00.000Z',
+        key_alias: 'tlg_mock_alias',
+        token_id: 'token-1',
+        model_group: 'code-premium',
+        prompt_tokens: 10,
+        completion_tokens: 2,
+        spend: 0.01,
+        status: 'success',
+      },
+    ];
+    const prisma = createMockPrisma();
+    const app = await buildApp(env, prisma, litellm);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/keys',
+      headers: { authorization: `Bearer ${env.ADMIN_TOKEN}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()[0]).toMatchObject({
+      id: 'key-1',
+      lastUsedAt: '2026-06-30T02:00:00.000Z',
+    });
+    expect(prisma.apiKey.updatePayloads.at(-1)?.data).toEqual({
+      lastUsedAt: new Date('2026-06-30T02:00:00.000Z'),
+    });
+
+    await app.close();
+  });
+
+  it('keeps key listing available when LiteLLM spend logs fail', async () => {
+    const litellm = new MockLiteLlmAdminClient();
+    litellm.failSpendLogs = true;
+    const app = await buildApp(env, createMockPrisma(), litellm);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/keys',
+      headers: { authorization: `Bearer ${env.ADMIN_TOKEN}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()[0]).toMatchObject({ id: 'key-1', lastUsedAt: null });
+
+    await app.close();
+  });
+
   it('cleans up the LiteLLM key if local metadata storage fails', async () => {
     const litellm = new MockLiteLlmAdminClient();
     const prisma = createMockPrisma({ failCreate: true });
@@ -131,6 +182,7 @@ class MockLiteLlmAdminClient implements LiteLlmAdminClient {
   created: LiteLlmCreateVirtualKeyInput | null = null;
   revokedAliases: string[] = [];
   spendLogs: unknown[] = [];
+  failSpendLogs = false;
 
   async ensureUser(): Promise<void> {}
   async ensureTeam(): Promise<void> {}
@@ -150,6 +202,10 @@ class MockLiteLlmAdminClient implements LiteLlmAdminClient {
   }
 
   async getSpendLogs(_query: LiteLlmSpendLogQuery): Promise<unknown[]> {
+    if (this.failSpendLogs) {
+      throw new Error('spend logs unavailable');
+    }
+
     return this.spendLogs;
   }
 
@@ -171,6 +227,7 @@ function createMockPrisma(options: { failCreate?: boolean } = {}) {
     apiKey: {
       createPayload: null as { data: Record<string, unknown> } | null,
       updatePayload: null as { data: Record<string, unknown> } | null,
+      updatePayloads: [] as Array<{ data: Record<string, unknown> }>,
       create: async (payload: { data: Record<string, unknown> }) => {
         if (options.failCreate) {
           throw new Error('local insert failed');
@@ -194,8 +251,26 @@ function createMockPrisma(options: { failCreate?: boolean } = {}) {
         litellmKeyAlias: 'tlg_mock_alias',
         status: 'active',
       }),
+      findMany: async () => [
+        {
+          id: 'key-1',
+          prefix: 'sk',
+          litellmKeyAlias: 'tlg_mock_alias',
+          litellmKeyId: 'token-1',
+          name: 'codex',
+          status: 'active',
+          userId: 'user-1',
+          teamId: 'team-1',
+          user: { id: 'user-1', email: 'dev@example.com', name: 'Dev Example', role: 'developer' },
+          team: { id: 'team-1', slug: 'engineering', name: 'Engineering' },
+          lastUsedAt: null,
+          revokedAt: null,
+          createdAt: new Date('2026-06-30T00:00:00.000Z'),
+        },
+      ],
       update: async (payload: { data: Record<string, unknown> }) => {
         prisma.apiKey.updatePayload = payload;
+        prisma.apiKey.updatePayloads.push(payload);
         return {
           id: 'key-1',
           status: 'revoked',

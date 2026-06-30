@@ -12,7 +12,6 @@ import {
   normalizeLiteLlmSpendLog,
   type LiteLlmUsageRecord,
 } from '../services/litellmUsageService.js';
-import { normalizeAllowedModels } from '../services/modelPolicy.js';
 import {
   buildLiteLlmModelPayload,
   checkOpenAiCompatibleProvider,
@@ -42,7 +41,6 @@ const createKeySchema = z.object({
   userId: z.string().min(1),
   teamId: z.string().min(1).optional(),
   name: z.string().min(1).default('default'),
-  models: z.array(z.string().min(1)).optional(),
   maxBudget: z.number().positive().optional(),
   budgetDuration: z.string().min(1).optional(),
   tpmLimit: z.number().int().positive().optional(),
@@ -214,7 +212,7 @@ export async function adminRoutes(
         return withMeta(await listAliases(prisma), 'provider-registry', started);
       }
       if (params.section === 'keys') {
-        return withMeta(await listKeys(prisma), 'litellm-local-metadata', started);
+        return withMeta(await listKeys(prisma, litellmAdmin), 'litellm-local-metadata', started);
       }
 
       return withMeta(
@@ -318,7 +316,6 @@ export async function adminRoutes(
       ownerName: user.name,
       ownerEmail: user.email,
       role: user.role,
-      models: normalizeAllowedModels(input.models),
       budget: {
         maxBudget: input.maxBudget ?? env.DEFAULT_KEY_MAX_BUDGET,
         budgetDuration: input.budgetDuration ?? env.DEFAULT_KEY_BUDGET_DURATION,
@@ -366,7 +363,7 @@ export async function adminRoutes(
     return reply.code(201).send({ ...key, apiKey: virtualKey.key });
   });
 
-  app.get('/keys', async () => listKeys(prisma));
+  app.get('/keys', async () => listKeys(prisma, litellmAdmin));
 
   app.post('/keys/:id/revoke', async (request, reply) => {
     const params = z.object({ id: z.string().min(1) }).parse(request.params);
@@ -1199,8 +1196,8 @@ async function listAliases(prisma: PrismaLike) {
   return aliases.map(formatModelAlias);
 }
 
-async function listKeys(prisma: PrismaLike) {
-  return prisma.apiKey.findMany({
+async function listKeys(prisma: PrismaLike, litellmAdmin: LiteLlmAdminClient) {
+  const keys = await prisma.apiKey.findMany({
     select: {
       id: true,
       prefix: true,
@@ -1218,6 +1215,33 @@ async function listKeys(prisma: PrismaLike) {
     },
     orderBy: { createdAt: 'desc' },
   });
+
+  let latestUsageByKey: Map<string, Date>;
+  try {
+    latestUsageByKey = latestLiteLlmUsageByKey(await getLiteLlmUsage(litellmAdmin, {}));
+  } catch {
+    return keys;
+  }
+
+  const updates: Array<Promise<unknown>> = [];
+  for (const key of keys) {
+    const latest = latestKeyUsage(key, latestUsageByKey);
+    if (!latest || !isAfter(latest, key.lastUsedAt)) {
+      continue;
+    }
+
+    key.lastUsedAt = latest;
+    updates.push(
+      prisma.apiKey.update({
+        where: { id: key.id },
+        data: { lastUsedAt: latest },
+        select: { id: true },
+      }),
+    );
+  }
+
+  await Promise.allSettled(updates);
+  return keys;
 }
 
 async function getUsageSummary(
@@ -1679,6 +1703,46 @@ async function getLiteLlmUsage(
 ) {
   const logs = await litellmAdmin.getSpendLogs(query);
   return logs.map(normalizeLiteLlmSpendLog).filter((record) => record !== null);
+}
+
+function latestLiteLlmUsageByKey(records: Awaited<ReturnType<typeof getLiteLlmUsage>>) {
+  const latest = new Map<string, Date>();
+
+  for (const record of records) {
+    for (const key of [record.keyAlias, record.keyId]) {
+      if (!key) continue;
+
+      const current = latest.get(key);
+      if (!current || record.timestamp > current) {
+        latest.set(key, record.timestamp);
+      }
+    }
+  }
+
+  return latest;
+}
+
+function latestKeyUsage(
+  key: { litellmKeyAlias?: string | null; litellmKeyId?: string | null },
+  latestUsageByKey: Map<string, Date>,
+) {
+  const candidates = [key.litellmKeyAlias, key.litellmKeyId]
+    .map((id) => (id ? latestUsageByKey.get(id) : null))
+    .filter((date): date is Date => date instanceof Date);
+
+  return candidates.reduce<Date | null>(
+    (latest, date) => (!latest || date > latest ? date : latest),
+    null,
+  );
+}
+
+function isAfter(candidate: Date, current: Date | string | null | undefined) {
+  if (!current) {
+    return true;
+  }
+
+  const currentDate = current instanceof Date ? current : new Date(current);
+  return Number.isNaN(currentDate.valueOf()) || candidate > currentDate;
 }
 
 function dailyLiteLlmRollup(records: Awaited<ReturnType<typeof getLiteLlmUsage>>) {

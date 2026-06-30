@@ -210,7 +210,7 @@ export const api = {
     token: string,
     payload: { email: string; name: string; team?: { slug: string; name: string } },
   ) => request<User>(token, '/users', { method: 'POST', body: JSON.stringify(payload) }),
-  createKey: (token: string, payload: { userId: string; name: string; models: string[] }) =>
+  createKey: (token: string, payload: { userId: string; name: string }) =>
     request<ApiKey & { apiKey: string }>(token, '/keys', {
       method: 'POST',
       body: JSON.stringify(payload),

@@ -14,7 +14,6 @@ export type LiteLlmCreateVirtualKeyInput = {
   ownerName: string;
   ownerEmail: string;
   role: string;
-  models: string[];
   budget: LiteLlmKeyBudget;
 };
 
@@ -44,7 +43,6 @@ export function buildLiteLlmKeyPayload(input: LiteLlmCreateVirtualKeyInput) {
     key_alias: input.alias,
     user_id: input.userId,
     team_id: input.teamId ?? undefined,
-    models: input.models,
     metadata: {
       user_id: input.userId,
       team_id: input.teamId ?? null,
@@ -81,7 +79,7 @@ export function buildLiteLlmTeamPayload(input: LiteLlmCreateVirtualKeyInput) {
   return {
     team_id: input.teamId,
     team_alias: input.teamId,
-    models: input.models,
+    models: [],
     metadata: {
       source: 'team-llm-gateway',
     },
@@ -110,6 +108,7 @@ export class HttpLiteLlmAdminClient implements LiteLlmAdminClient {
     }
 
     await this.requestIgnoringConflict('/team/new', payload);
+    await this.requestIgnoringConflict('/team/update', payload);
   }
 
   async createVirtualKey(input: LiteLlmCreateVirtualKeyInput): Promise<LiteLlmVirtualKey> {

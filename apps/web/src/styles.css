@@ -1041,6 +1041,19 @@ button.sort {
   align-items: end;
   margin-bottom: 14px;
 }
+.leaderboard-controls {
+  display: grid;
+  grid-template-columns: 180px 160px 220px 150px 150px;
+  gap: 10px;
+  align-items: end;
+  margin: 0 0 16px;
+}
+.leaderboard-controls .field {
+  min-width: 0;
+}
+.usage-actions {
+  align-items: center;
+}
 .toolbar-row {
   display: flex;
   align-items: flex-start;
@@ -1318,7 +1331,8 @@ button.sort {
     width: 100%;
   }
   .check-grid,
-  .usage-filters {
+  .usage-filters,
+  .leaderboard-controls {
     grid-template-columns: 1fr;
   }
   .hero-status,

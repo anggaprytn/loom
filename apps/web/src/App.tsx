@@ -42,7 +42,8 @@ type ActivityItem = { id: string; at: Date; tone: Tone; label: string };
 type LoadStatus = 'idle' | 'loading' | 'current' | 'stale' | 'failed';
 type SectionState = { status: LoadStatus; lastLoadedAt: Date | null; error?: string };
 type SectionStates = Record<SectionKey, SectionState>;
-type UsageTab = 'users' | 'teams' | 'models' | 'attribution';
+type UsageTab = 'users' | 'teams' | 'models' | 'keys' | 'attribution';
+type UsageMetric = 'estimatedCost' | 'totalTokens' | 'requests' | 'errors';
 type ThemeMode = 'system' | 'light' | 'dark';
 type ResolvedTheme = 'light' | 'dark';
 type PendingAction =
@@ -685,23 +686,16 @@ function Keys({
     const form = new FormData(event.currentTarget);
     const userId = String(form.get('userId') || '');
     const name = String(form.get('name') || '').trim();
-    const checkedModels = form.getAll('models').map((model) => String(model).trim());
-    const fallbackModels = String(form.get('modelsText') || '')
-      .split(',')
-      .map((model) => model.trim())
-      .filter(Boolean);
-    const models = checkedModels.length ? checkedModels : fallbackModels;
-    if (!userId || !name || !models.length)
-      return notify('Developer, key name, and model access are required.', 'warn');
+    if (!userId || !name) return notify('Developer and key name are required.', 'warn');
     const developer = data.users.find((user) => user.id === userId);
     try {
-      const key = await api.createKey(token, { userId, name, models });
+      const key = await api.createKey(token, { userId, name });
       setNewKey({ value: key.apiKey, developer: developer?.email || userId });
       setCopiedKey(false);
       notify(`Developer key issued for ${developer?.email || userId}.`);
     } catch (error) {
       notify(
-        `Developer key issue failed. Check the selected developer and model access, then retry. ${
+        `Developer key issue failed. Check the selected developer, then retry. ${
           error instanceof Error ? error.message : ''
         }`,
         'danger',
@@ -711,7 +705,7 @@ function Keys({
 
   return (
     <>
-      <SectionErrors errors={errors} sections={['users', 'keys', 'aliases']} onRetry={onRetry} />
+      <SectionErrors errors={errors} sections={['users', 'keys']} onRetry={onRetry} />
       {newKey && (
         <OneTimeSecretPanel
           value={newKey.value}
@@ -730,7 +724,7 @@ function Keys({
             <div className="flow-heading full">
               <Badge tone="info">Primary</Badge>
               <strong>Issue access</strong>
-              <span>Select a developer, choose allowed aliases, then issue the key.</span>
+              <span>Select a developer, then issue a key that can use enabled aliases.</span>
             </div>
             <div className="field full">
               <span>Developer *</span>
@@ -747,26 +741,6 @@ function Keys({
               />
             </div>
             <Field label="Key Name" name="name" required defaultValue="codex" />
-            <div className="field full">
-              <span>Model Access *</span>
-              {data.aliases.filter((alias) => alias.enabled).length ? (
-                <div className="check-grid">
-                  {data.aliases
-                    .filter((alias) => alias.enabled)
-                    .map((alias) => (
-                      <label key={alias.id} className="check-row">
-                        <input name="models" type="checkbox" value={alias.alias} defaultChecked />
-                        <span>
-                          <strong>{alias.alias}</strong>
-                          <small>{alias.provider?.slug || 'unknown provider'}</small>
-                        </span>
-                      </label>
-                    ))}
-                </div>
-              ) : (
-                <input name="modelsText" defaultValue="code-premium,code-balanced,code-fallback" />
-              )}
-            </div>
             <div className="actions full">
               <Button tone="primary" icon={<KeyRound />} type="submit">
                 Issue developer key
@@ -1244,7 +1218,7 @@ function Aliases({
           options={['enabled', 'disabled']}
         />
         <DataTable
-          empty="No model aliases yet. Create stable names like code-premium before issuing developer keys."
+          empty="No model aliases yet. Create stable names like code-premium before sending traffic."
           sort={sort}
           setSort={setSort}
           columns={[
@@ -1361,19 +1335,20 @@ function Usage({
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [loading, setLoading] = useState(false);
-  const [preset, setPreset] = useState('last7');
+  const [preset, setPreset] = useState('allTime');
+  const [metric, setMetric] = useState<UsageMetric>('estimatedCost');
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<UsageTab>('users');
   useEffect(() => setUsage(data.usage), [data.usage]);
-  const topUsersByCost = usage?.topUsersByCost?.length ? usage.topUsersByCost : usage?.byUser || [];
-  const topUsersByTokens = usage?.topUsersByTokens?.length
-    ? usage.topUsersByTokens
-    : [...(usage?.byUser || [])].sort(
-        (a, b) => Number(b.totalTokens || 0) - Number(a.totalTokens || 0),
-      );
+  const rankedUsers = rankUsageRows(usage?.byUser || [], metric);
+  const rankedTeams = rankUsageRows(usage?.byTeam || [], metric);
+  const rankedModels = rankUsageRows(usage?.byModel || [], metric);
+  const rankedKeys = rankUsageRows(usage?.byKey || [], metric);
   const selectedUser =
     (usage?.byUser || []).find((row) => usageUserId(row) === selectedUserId) || null;
   const unknownRequests = usage?.unknownAttribution?.requests || 0;
+  const rangeLabel = usagePresetLabel(preset);
+  const metricLabel = usageMetricLabel(metric);
 
   const applyPreset = (value: string) => {
     setPreset(value);
@@ -1433,60 +1408,7 @@ function Usage({
                 </div>
               )}
             </div>
-            <div className="actions">
-              <details className="filter-disclosure">
-                <summary>Filters</summary>
-                <div className="filter-popover">
-                  <div className="field">
-                    <span>Source</span>
-                    <SearchableSelect
-                      value={source}
-                      onChange={(value) => setSource(value as 'litellm' | 'local')}
-                      options={[
-                        { value: 'litellm', label: 'LiteLLM spend logs' },
-                        { value: 'local', label: 'Local ingest records' },
-                      ]}
-                    />
-                  </div>
-                  <div className="field">
-                    <span>Range</span>
-                    <SearchableSelect
-                      value={preset}
-                      onChange={applyPreset}
-                      options={[
-                        { value: 'today', label: 'Today' },
-                        { value: 'yesterday', label: 'Yesterday' },
-                        { value: 'last7', label: 'Last 7 days' },
-                        { value: 'thisMonth', label: 'This month' },
-                        { value: 'lastMonth', label: 'Last month' },
-                        { value: 'custom', label: 'Custom range' },
-                      ]}
-                    />
-                  </div>
-                  <label className="field">
-                    <span>From</span>
-                    <input
-                      type="date"
-                      value={from}
-                      onChange={(event) => {
-                        setPreset('custom');
-                        setFrom(event.target.value);
-                      }}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>To</span>
-                    <input
-                      type="date"
-                      value={to}
-                      onChange={(event) => {
-                        setPreset('custom');
-                        setTo(event.target.value);
-                      }}
-                    />
-                  </label>
-                </div>
-              </details>
+            <div className="actions usage-actions">
               <UsageExportMenu usage={usage} />
               {pendingAction?.kind === 'usage-refresh' && (
                 <PendingBadge>Refreshing...</PendingBadge>
@@ -1501,6 +1423,64 @@ function Usage({
               </Button>
             </div>
           </div>
+          <div className="leaderboard-controls">
+            <div className="field">
+              <span>Range</span>
+              <SearchableSelect
+                value={preset}
+                onChange={applyPreset}
+                options={[
+                  { value: 'allTime', label: 'All time' },
+                  { value: 'thisWeek', label: 'This week' },
+                  { value: 'thisMonth', label: 'This month' },
+                  { value: 'lastMonth', label: 'Last month' },
+                  { value: 'last7', label: 'Last 7 days' },
+                  { value: 'today', label: 'Today' },
+                  { value: 'custom', label: 'Custom range' },
+                ]}
+              />
+            </div>
+            <div className="field">
+              <span>Rank by</span>
+              <SearchableSelect
+                value={metric}
+                onChange={(value) => setMetric(value as UsageMetric)}
+                options={[
+                  { value: 'estimatedCost', label: 'Cost' },
+                  { value: 'totalTokens', label: 'Tokens' },
+                  { value: 'requests', label: 'Requests' },
+                  { value: 'errors', label: 'Errors' },
+                ]}
+              />
+            </div>
+            <div className="field">
+              <span>Source</span>
+              <SearchableSelect
+                value={source}
+                onChange={(value) => setSource(value as 'litellm' | 'local')}
+                options={[
+                  { value: 'litellm', label: 'LiteLLM spend logs' },
+                  { value: 'local', label: 'Local ingest records' },
+                ]}
+              />
+            </div>
+            {preset === 'custom' && (
+              <>
+                <label className="field">
+                  <span>From</span>
+                  <input
+                    type="date"
+                    value={from}
+                    onChange={(event) => setFrom(event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>To</span>
+                  <input type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+                </label>
+              </>
+            )}
+          </div>
         </form>
         <Tabs
           active={activeTab}
@@ -1509,31 +1489,41 @@ function Usage({
             { id: 'users', label: 'Users' },
             { id: 'teams', label: 'Teams' },
             { id: 'models', label: 'Models' },
+            { id: 'keys', label: 'Keys' },
             { id: 'attribution', label: 'Attribution' },
           ]}
         />
         {activeTab === 'users' && (
           <UserUsageTable
-            title="Top users by cost"
-            rows={topUsersByCost}
+            title={`User leaderboard · ${rangeLabel} · ${metricLabel}`}
+            rows={rankedUsers}
+            defaultSortKey={metric}
             onSelect={(row) => setSelectedUserId(usageUserId(row))}
           />
         )}
         {activeTab === 'teams' && (
-          <UsageTable title="By team" rows={usage?.byTeam || []} rowKey="team" />
+          <UsageTable
+            title={`Team leaderboard · ${rangeLabel} · ${metricLabel}`}
+            rows={rankedTeams}
+            rowKey="team"
+            defaultSortKey={metric}
+          />
         )}
         {activeTab === 'models' && (
-          <>
-            <UsageTable title="By model" rows={usage?.byModel || []} rowKey="model" />
-            <details className="setup-disclosure stack">
-              <summary>Show top users by tokens</summary>
-              <UserUsageTable
-                title="Top users by tokens"
-                rows={topUsersByTokens}
-                onSelect={(row) => setSelectedUserId(usageUserId(row))}
-              />
-            </details>
-          </>
+          <UsageTable
+            title={`Model leaderboard · ${rangeLabel} · ${metricLabel}`}
+            rows={rankedModels}
+            rowKey="model"
+            defaultSortKey={metric}
+          />
+        )}
+        {activeTab === 'keys' && (
+          <UsageTable
+            title={`Key leaderboard · ${rangeLabel} · ${metricLabel}`}
+            rows={rankedKeys}
+            rowKey="key"
+            defaultSortKey={metric}
+          />
         )}
         {activeTab === 'attribution' && (
           <AttributionPanel usage={usage} unknownRequests={unknownRequests} />
@@ -1870,13 +1860,16 @@ function UsageStatus({
 function UserUsageTable({
   title,
   rows,
+  defaultSortKey = 'estimatedCost',
   onSelect,
 }: {
   title: string;
   rows: UsageGroup[];
+  defaultSortKey?: UsageMetric;
   onSelect: (row: UsageGroup) => void;
 }) {
-  const [sort, setSort] = useState<SortState>({ key: 'estimatedCost', dir: 'desc' });
+  const [sort, setSort] = useState<SortState>({ key: defaultSortKey, dir: 'desc' });
+  useEffect(() => setSort({ key: defaultSortKey, dir: 'desc' }), [defaultSortKey]);
   const sorted = useMemo(() => sortRows(rows, sort), [rows, sort]);
   return (
     <div>
@@ -1999,12 +1992,15 @@ function UsageTable({
   title,
   rows,
   rowKey,
+  defaultSortKey = 'requests',
 }: {
   title: string;
   rows: UsageGroup[];
   rowKey: string;
+  defaultSortKey?: UsageMetric | 'requests';
 }) {
-  const [sort, setSort] = useState<SortState>({ key: 'requests', dir: 'desc' });
+  const [sort, setSort] = useState<SortState>({ key: defaultSortKey, dir: 'desc' });
+  useEffect(() => setSort({ key: defaultSortKey, dir: 'desc' }), [defaultSortKey]);
   const sorted = useMemo(() => sortRows(rows, sort), [rows, sort]);
   return (
     <div>
@@ -2563,6 +2559,7 @@ function usageUserLabel(row: UsageGroup) {
 
 function usageGroupLabel(row: UsageGroup, key: string) {
   if (key === 'team') return row.team?.name || row.team?.slug || 'Unknown team';
+  if (key === 'key') return String(row.key?.name || row.keyId || row.keyAlias || 'Unknown key');
   if (key === 'name') return String(row.name || 'Unknown');
   return String(row[key] || 'Unknown');
 }
@@ -2571,12 +2568,40 @@ function formatMoney(value: unknown) {
   return `$${Number(value || 0).toFixed(4)}`;
 }
 
+function rankUsageRows(rows: UsageGroup[], metric: UsageMetric) {
+  return [...rows].sort((a, b) => Number(b[metric] || 0) - Number(a[metric] || 0));
+}
+
+function usageMetricLabel(metric: UsageMetric) {
+  if (metric === 'estimatedCost') return 'Cost';
+  if (metric === 'totalTokens') return 'Tokens';
+  if (metric === 'requests') return 'Requests';
+  return 'Errors';
+}
+
+function usagePresetLabel(value: string) {
+  if (value === 'allTime') return 'All time';
+  if (value === 'thisWeek') return 'This week';
+  if (value === 'thisMonth') return 'This month';
+  if (value === 'lastMonth') return 'Last month';
+  if (value === 'last7') return 'Last 7 days';
+  if (value === 'today') return 'Today';
+  if (value === 'yesterday') return 'Yesterday';
+  return 'Custom range';
+}
+
 function usagePresetRange(value: string) {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const iso = (date: Date) => date.toISOString().slice(0, 10);
+  if (value === 'allTime') return { from: '', to: '' };
   if (value === 'today') return { from: iso(today), to: iso(addDays(today, 1)) };
   if (value === 'yesterday') return { from: iso(addDays(today, -1)), to: iso(today) };
+  if (value === 'thisWeek') {
+    const day = today.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    return { from: iso(addDays(today, mondayOffset)), to: iso(addDays(today, 1)) };
+  }
   if (value === 'thisMonth') {
     return {
       from: iso(new Date(now.getFullYear(), now.getMonth(), 1)),

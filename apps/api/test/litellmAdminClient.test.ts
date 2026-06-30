@@ -14,7 +14,6 @@ const input: LiteLlmCreateVirtualKeyInput = {
   ownerName: 'Dev Example',
   ownerEmail: 'dev@example.com',
   role: 'developer',
-  models: ['code-premium', 'code-balanced', 'code-fallback'],
   budget: {
     maxBudget: 25,
     budgetDuration: '30d',
@@ -24,12 +23,11 @@ const input: LiteLlmCreateVirtualKeyInput = {
 };
 
 describe('LiteLLM admin payloads', () => {
-  it('builds virtual key payload with metadata, models, and budgets', () => {
+  it('builds virtual key payload with metadata and budgets but no model restrictions', () => {
     expect(buildLiteLlmKeyPayload(input)).toEqual({
       key_alias: 'tlg_test',
       user_id: 'user-1',
       team_id: 'team-1',
-      models: ['code-premium', 'code-balanced', 'code-fallback'],
       metadata: {
         user_id: 'user-1',
         team_id: 'team-1',
@@ -54,7 +52,7 @@ describe('LiteLLM admin payloads', () => {
     });
     expect(buildLiteLlmTeamPayload(input)).toMatchObject({
       team_id: 'team-1',
-      models: ['code-premium', 'code-balanced', 'code-fallback'],
+      models: [],
     });
   });
 
