@@ -37,15 +37,15 @@ Target structure:
 
 Exact copy:
 
-| Current | Replace with | Reason |
-| --- | --- | --- |
-| `Locked` | `Token required` | States the missing requirement. |
-| `Admin session` | `Token loaded` | Avoids implying a known user identity. |
-| `Unlock` | `Load dashboard` | Names the actual operation. |
-| `Refresh` | `Reload dashboard` | Use only after data has loaded. |
-| `Clear` | `Clear token` | Names what will be cleared. |
-| `Refreshing` | `Loading dashboard` | Matches the primary action. |
-| `Enter the admin token before refreshing.` | `Enter the admin token before loading dashboard data.` | Avoids refresh-only framing. |
+| Current                                    | Replace with                                           | Reason                                 |
+| ------------------------------------------ | ------------------------------------------------------ | -------------------------------------- |
+| `Locked`                                   | `Token required`                                       | States the missing requirement.        |
+| `Admin session`                            | `Token loaded`                                         | Avoids implying a known user identity. |
+| `Unlock`                                   | `Load dashboard`                                       | Names the actual operation.            |
+| `Refresh`                                  | `Reload dashboard`                                     | Use only after data has loaded.        |
+| `Clear`                                    | `Clear token`                                          | Names what will be cleared.            |
+| `Refreshing`                               | `Loading dashboard`                                    | Matches the primary action.            |
+| `Enter the admin token before refreshing.` | `Enter the admin token before loading dashboard data.` | Avoids refresh-only framing.           |
 
 Behavior requirements:
 
@@ -60,20 +60,20 @@ Behavior requirements:
 
 Every action label must name the operational effect.
 
-| Current | Replace with |
-| --- | --- |
-| `Health` | `Check health` |
-| `Sync` | `Sync alias` |
-| `Apply` | `Refresh usage` |
-| `Create Key` | `Issue developer key` |
-| `Issue Personal Key` | `Issue developer key` |
-| `Create + Sync` | `Create and sync alias` |
-| `Copy Codex Env` | `Copy Codex config` |
-| `Details` | `View details` |
-| `Action completed.` | Exact result, such as `Provider disabled.` |
-| `Partial data failure` | `Some dashboard data failed to load.` |
-| `No provider` | `No providers configured` |
-| `Needs check` | `Unchecked` |
+| Current                                             | Replace with                                   |
+| --------------------------------------------------- | ---------------------------------------------- |
+| `Health`                                            | `Check health`                                 |
+| `Sync`                                              | `Sync alias`                                   |
+| `Apply`                                             | `Refresh usage`                                |
+| `Create Key`                                        | `Issue developer key`                          |
+| `Issue Personal Key`                                | `Issue developer key`                          |
+| `Create + Sync`                                     | `Create and sync alias`                        |
+| `Copy Codex Env`                                    | `Copy Codex config`                            |
+| `Details`                                           | `View details`                                 |
+| `Action completed.`                                 | Exact result, such as `Provider disabled.`     |
+| `Partial data failure`                              | `Some dashboard data failed to load.`          |
+| `No provider`                                       | `No providers configured`                      |
+| `Needs check`                                       | `Unchecked`                                    |
 | `No operator activity in this browser session yet.` | `No actions recorded in this browser session.` |
 
 Use `developer key` as the primary UI term. Explain once in helper text:
@@ -84,13 +84,13 @@ Use `developer key` as the primary UI term. Explain once in helper text:
 
 Empty states must tell the operator the next direct action.
 
-| Surface | Target copy |
-| --- | --- |
-| Keys table | `No developer keys yet. Select a developer and issue the first key.` |
-| Providers table | `No providers configured. Add a provider before creating aliases.` |
-| Aliases table | `No model aliases configured. Create an alias before issuing developer keys.` |
-| Usage tables | `No usage found for this source and date range. Adjust filters or check LiteLLM spend logs.` |
-| Activity panel | `No actions recorded in this browser session.` |
+| Surface         | Target copy                                                                                  |
+| --------------- | -------------------------------------------------------------------------------------------- |
+| Keys table      | `No developer keys yet. Select a developer and issue the first key.`                         |
+| Providers table | `No providers configured. Add a provider before creating aliases.`                           |
+| Aliases table   | `No model aliases configured. Create an alias before issuing developer keys.`                |
+| Usage tables    | `No usage found for this source and date range. Adjust filters or check LiteLLM spend logs.` |
+| Activity panel  | `No actions recorded in this browser session.`                                               |
 
 ### Toasts
 

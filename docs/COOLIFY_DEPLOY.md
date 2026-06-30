@@ -69,20 +69,20 @@ No service should publish host ports in production. Let Coolify route domains to
 Route developer traffic to LiteLLM only:
 
 ```text
-https://llm.apps.anggaprytn.com/v1 -> litellm:4000/v1
-https://llm-admin.apps.anggaprytn.com -> api:3000
+https://llm.example.com/v1 -> litellm:4000/v1
+https://llm-admin.example.com -> api:3000
 ```
 
 For Docker Compose apps in Coolify, the internal port must be part of the service FQDN mapping. This Compose file sets:
 
 ```text
-SERVICE_FQDN_ADMIN_3000=llm-admin.apps.anggaprytn.com
-SERVICE_FQDN_GATEWAY_4000=llm.apps.anggaprytn.com
+SERVICE_FQDN_ADMIN_3000=llm-admin.example.com
+SERVICE_FQDN_GATEWAY_4000=llm.example.com
 ```
 
 Use bare hostnames for `SERVICE_FQDN_*`; do not include `https://`. Coolify attaches TLS at the proxy layer.
 
-If configuring domains in the UI manually, attach `llm-admin.apps.anggaprytn.com` to service `api` port `3000`, and `llm.apps.anggaprytn.com` to service `litellm` port `4000`.
+If configuring domains in the UI manually, attach `llm-admin.example.com` to service `api` port `3000`, and `llm.example.com` to service `litellm` port `4000`.
 
 Do not proxy 9Router publicly. If the admin API or `/dashboard` is exposed, put it behind VPN/auth and keep `ADMIN_TOKEN` long and rotated. Dynamic provider API keys stored through the admin API are encrypted with `PROVIDER_SECRET_KEY`, so keep that secret stable across restarts and backups.
 

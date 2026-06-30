@@ -24,7 +24,7 @@ LiteLLM is the request-time source of truth for auth, model allowlists, LiteLLM-
 - `User`: person who can own multiple keys.
 - `Team`: optional grouping for users, keys, usage, and budgets.
 - `ApiKey`: hashed local copy of a LiteLLM virtual key plus LiteLLM alias/token reference and active/revoked status.
-- `Provider`: OpenAI-compatible upstream target such as local 9Router, `ai.company.com`, OpenAI, or another private gateway. API keys are encrypted with `PROVIDER_SECRET_KEY`; browser sessions are not stored.
+- `Provider`: OpenAI-compatible upstream target such as local 9Router, `ai.example.com`, OpenAI, or another private gateway. API keys are encrypted with `PROVIDER_SECRET_KEY`; browser sessions are not stored.
 - `ModelAlias`: public LiteLLM model alias mapped to a provider and upstream model id, for example `code-premium -> 9router/openai/gemini-2.5-pro`.
 - `UsageRecord`: local/manual structured usage event without raw prompts or completions. Default operational usage views read LiteLLM spend logs.
 - `BudgetLimit`: monthly user/team token and cost limits.

@@ -982,7 +982,7 @@ function Providers({
           options={['enabled', 'disabled', 'healthy', 'unhealthy', 'unchecked']}
         />
         <DataTable
-          empty="No providers configured. Add 9Router, ai.company.com, or another OpenAI-compatible upstream."
+          empty="No providers configured. Add 9Router, ai.example.com, or another OpenAI-compatible upstream."
           sort={sort}
           setSort={setSort}
           columns={[
@@ -1526,7 +1526,7 @@ function SettingsView({
 }) {
   const [confirmation, setConfirmation] = useState('');
   const env =
-    'OPENAI_BASE_URL=https://llm.apps.anggaprytn.com/v1\nOPENAI_API_KEY=<personal_litellm_key>\nOPENAI_MODEL=code-premium';
+    'OPENAI_BASE_URL=https://llm.example.com/v1\nOPENAI_API_KEY=<personal_litellm_key>\nOPENAI_MODEL=code-premium';
   return (
     <>
       <div className="grid two">

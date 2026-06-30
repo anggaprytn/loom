@@ -26,7 +26,7 @@ Current implementation creates and revokes LiteLLM virtual keys directly, attach
 Status: implemented as provider registry APIs and LiteLLM dynamic model sync.
 
 - Add encrypted provider registry for OpenAI-compatible upstreams.
-- Support local 9Router, `ai.company.com`, OpenAI-compatible vendor endpoints, and local model servers through the same model alias UX.
+- Support local 9Router, `ai.example.com`, OpenAI-compatible vendor endpoints, and local model servers through the same model alias UX.
 - Add model alias registry and LiteLLM `/model/new` sync.
 - Add provider health checks against `/v1/models`.
 - Add redacted LiteLLM model config render endpoint for operators.

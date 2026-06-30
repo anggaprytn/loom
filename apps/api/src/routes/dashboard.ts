@@ -434,7 +434,7 @@ function renderDashboard() {
                 <h3>Codex Configuration</h3>
                 <p class="sub">Give each developer their own LiteLLM virtual key.</p>
                 <div class="callout info mono">
-OPENAI_BASE_URL=https://llm.apps.anggaprytn.com/v1<br />
+OPENAI_BASE_URL=https://llm.example.com/v1<br />
 OPENAI_API_KEY=&lt;personal_litellm_key&gt;<br />
 OPENAI_MODEL=code-premium
                 </div>
@@ -517,7 +517,7 @@ OPENAI_MODEL=code-premium
       $('clearToken').onclick = clearSession;
       $('clearSession').onclick = clearSession;
       $('refresh').onclick = refresh;
-      $('copyCodex').onclick = () => copyText('OPENAI_BASE_URL=https://llm.apps.anggaprytn.com/v1\\nOPENAI_API_KEY=<personal_litellm_key>\\nOPENAI_MODEL=code-premium');
+      $('copyCodex').onclick = () => copyText('OPENAI_BASE_URL=https://llm.example.com/v1\\nOPENAI_API_KEY=<personal_litellm_key>\\nOPENAI_MODEL=code-premium');
 
       async function api(path, options = {}) {
         const token = $('adminToken').value || localStorage.getItem('tlg_admin_token');
@@ -723,7 +723,7 @@ OPENAI_MODEL=code-premium
           'Actions'
         ], rows.map((p) =>
           '<tr><td><strong>' + esc(p.slug) + '</strong><div class="hint">' + esc(p.name) + '</div></td><td class="truncate mono" title="' + esc(p.baseUrl) + '">' + esc(p.baseUrl) + '</td><td>' + esc(p.apiKeyLast4 ? '***' + p.apiKeyLast4 : 'none') + '</td><td>' + providerBadge(p) + '</td><td>' + esc(fmtDate(p.lastHealthAt)) + '</td><td><div class="row tight"><button class="secondary" onclick="health(\\'' + esc(p.id) + '\\')">Health</button><button class="secondary" onclick="rotateProvider(\\'' + esc(p.id) + '\\')">Rotate</button><button class="danger" onclick="deleteProvider(\\'' + esc(p.id) + '\\')">Disable</button></div></td></tr>'
-        ), 'No providers configured. Add 9Router, ai.company.com, or another OpenAI-compatible upstream.', 1040);
+        ), 'No providers configured. Add 9Router, ai.example.com, or another OpenAI-compatible upstream.', 1040);
       }
       function providerBadge(p) {
         if (!p.enabled) return '<span class="badge off">Disabled</span>';

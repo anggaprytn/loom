@@ -1,53 +1,128 @@
-# team-llm-gateway
+![Loom Cover](https://blobshot-assets.apps.anggaprytn.com/api/files/pbc_1321337024/cagcoccc6vut3te/loom_o1aziz7kmh.webp)
 
-Internal LLM gateway for a small engineering team. LiteLLM is the OpenAI-compatible public proxy and request-time authority. 9router, `ai.company.com`, OpenAI, Gemini proxies, or another OpenAI-compatible provider can sit behind it. The control plane manages users, creates LiteLLM virtual keys, stores local metadata, manages provider/model aliases, and summarizes usage.
+# Loom
 
-This repo intentionally does not scrape credentials, store user passwords, automate password sharing, or bypass provider quotas. Upstream credentials are operator-provided through environment variables or the admin provider registry. Browser sessions/cookies are not accepted as provider credentials.
+Self-hosted control plane for team LLM access through LiteLLM.
 
-## Local Setup
+Loom gives an engineering team one OpenAI-compatible endpoint for coding tools and automation while keeping user access, provider routing, key lifecycle, usage visibility, and operator controls in one place. LiteLLM remains the request-time gateway; Loom manages the admin workflow around LiteLLM virtual keys, provider registry entries, model aliases, local metadata, usage summaries, and operational dashboards.
+
+## Why Loom Exists
+
+Small teams often end up with unmanaged AI access: shared keys, unknown spend, direct provider credentials on developer machines, no clean revocation path, and no stable model names across providers. Loom separates those concerns:
+
+- Developers use personal LiteLLM virtual keys against one `/v1` endpoint.
+- Operators manage users, teams, keys, upstream providers, and model aliases from an admin API or dashboard.
+- Provider credentials stay in environment variables or the encrypted provider registry.
+- LiteLLM handles request-time authentication, model allowlists, budgets supported by LiteLLM, proxying, and spend logs.
+
+Loom does not scrape credentials, pool browser sessions, automate password sharing, bypass provider quotas, or resell provider access. Use upstream accounts and API keys that are authorized for your team or organization.
+
+## Current Features
+
+- Fastify control-plane API with bearer-token admin auth.
+- React admin console served from `/dashboard`, with a minimal server-rendered fallback.
+- User and team records stored in Postgres through Prisma.
+- LiteLLM virtual key creation and revocation with local hashed key metadata.
+- Provider registry for OpenAI-compatible upstreams.
+- Provider API key encryption at rest with `PROVIDER_SECRET_KEY`.
+- Stable model aliases synced into LiteLLM dynamic model configuration.
+- Provider health checks against OpenAI-compatible `/v1/models`.
+- LiteLLM spend-log usage summaries by user and model.
+- Manual usage ingestion endpoint for fallback or future log-forwarder workflows.
+- Budget records for monthly token and cost limits, plus default LiteLLM key budget fields.
+- Docker Compose stack for API, LiteLLM, Postgres, and Redis.
+- Smoke scripts for gateway, key lifecycle, usage, and real-provider checks.
+
+## Architecture
+
+```text
+Developer tools / scripts
+  -> LiteLLM proxy using a personal LiteLLM virtual key
+  -> OpenAI-compatible upstream selected by static config or model alias
+  -> Provider
+
+Operators
+  -> Loom admin API or dashboard
+  -> LiteLLM admin APIs + Loom Postgres metadata
+```
+
+The control plane and LiteLLM use separate Postgres schemas:
+
+- `app`: Loom users, teams, key metadata, provider registry, aliases, usage records, budgets, audit events, and operations.
+- `litellm`: LiteLLM-managed tables.
+
+Keep these schemas separate because LiteLLM manages its own database schema.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for more detail.
+
+## Quick Start
+
+Prerequisites:
+
+- Node.js 20 or newer
+- npm
+- Docker and Docker Compose
+- An OpenAI-compatible upstream provider URL and API key
 
 ```bash
 cp .env.example .env
-# edit ADMIN_TOKEN, API_KEY_PEPPER, LITELLM_*, and ROUTER_* values
 npm install
 npm run prisma:generate
 docker compose up --build
 ```
 
-Services:
+Before starting the stack, edit `.env`:
 
-- Control plane API: internal container port `3000`, route with Coolify to `llm-admin.apps.anggaprytn.com`
-- React admin console: `apps/web`, run locally at `http://localhost:5173` with `/admin/*` proxied to the control-plane API
-- Minimal fallback dashboard: `/dashboard` on the control-plane API origin
-- LiteLLM proxy: internal container port `4000`, route with Coolify to `llm.apps.anggaprytn.com`
-- Postgres: private Compose network only
-- Redis: private Compose network only
+- Replace `ADMIN_TOKEN`, `API_KEY_PEPPER`, `PROVIDER_SECRET_KEY`, `LITELLM_MASTER_KEY`, and `LITELLM_SALT_KEY` with long random values.
+- Set `ROUTER_BASE_URL` and `ROUTER_API_KEY` for your upstream OpenAI-compatible provider.
+- Set the `ROUTER_*_MODEL` values to model strings accepted by LiteLLM for that upstream.
 
-The Compose stack does not publish host ports by default. This avoids collisions on shared hosts; use Coolify's reverse proxy or an explicit local override if you need direct localhost access.
+The Compose stack uses `expose`, not host `ports`, so it does not publish `localhost:3000` or `localhost:4000` by default. Route traffic through your reverse proxy, or add a local override if you want direct host ports during development.
 
-The control plane and LiteLLM use separate Postgres schemas: `app` and `litellm`. Keep them separate because LiteLLM manages its own Prisma schema.
+## Local Development
 
-Health check:
+For API and web development outside Compose:
 
 ```bash
-curl http://localhost:3000/health
-```
-
-Admin web development:
-
-```bash
+npm install
+npm run prisma:generate
 npm run dev:api
 npm run dev:web
 ```
 
-Open `http://localhost:5173`. The Vite dev server proxies admin API calls to `http://localhost:3000`.
+Open the Vite admin console at `http://localhost:5173`. The Vite dev server proxies admin API calls to `http://localhost:3000`.
 
-## Admin Examples
+Common commands:
+
+```bash
+npm run lint
+npm test
+npm run build
+npm run format:check
+npm run prisma:migrate
+```
+
+## Configuration
+
+Configuration is environment-driven. Start from [.env.example](.env.example) and store real values in your deployment secret store.
+
+Required groups:
+
+- Control plane: `DATABASE_URL`, `DIRECT_URL`, `ADMIN_TOKEN`, `API_KEY_PEPPER`, `PROVIDER_SECRET_KEY`
+- LiteLLM integration: `LITELLM_PROXY_URL`, `LITELLM_MASTER_KEY`
+- Static upstream bootstrap: `ROUTER_BASE_URL`, `ROUTER_API_KEY`, and `ROUTER_*_MODEL`
+- LiteLLM database: `LITELLM_DATABASE_URL`
+
+Optional values include `REDIS_URL`, `DEFAULT_KEY_MAX_BUDGET`, `DEFAULT_KEY_BUDGET_DURATION`, `DEFAULT_KEY_TPM_LIMIT`, and `DEFAULT_KEY_RPM_LIMIT`.
+
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full environment reference.
+
+## Usage
 
 Set your admin token:
 
 ```bash
-export ADMIN_TOKEN=change-me-admin-token
+export ADMIN_TOKEN=replace-with-your-admin-token
 ```
 
 Create a user:
@@ -68,73 +143,25 @@ curl -s http://localhost:3000/admin/keys \
   -d '{"userId":"USER_ID_FROM_PREVIOUS_RESPONSE","name":"codex-cli"}'
 ```
 
-The plaintext LiteLLM key is returned once, usually as `sk-...`. The control plane stores only a hash, prefix, LiteLLM key alias, and LiteLLM token id/reference metadata.
+The plaintext LiteLLM key is returned once. Loom stores only a hash, prefix, LiteLLM key alias, and LiteLLM token reference metadata.
 
-Insert a local/manual usage record:
-
-```bash
-curl -s http://localhost:3000/ingest/usage \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"userId":"USER_ID","keyId":"KEY_ID","model":"codex-default","provider":"9router","promptTokens":1000,"completionTokens":250,"estimatedCost":0.0125,"status":"success","latencyMs":1200}'
-```
-
-Inspect usage from LiteLLM spend logs:
-
-```bash
-curl -s http://localhost:3000/admin/usage -H "Authorization: Bearer $ADMIN_TOKEN"
-curl -s http://localhost:3000/admin/usage/by-user -H "Authorization: Bearer $ADMIN_TOKEN"
-curl -s http://localhost:3000/admin/usage/by-model -H "Authorization: Bearer $ADMIN_TOKEN"
-```
-
-For local/manual usage records, add `?source=local`.
-
-Create an OpenAI-compatible upstream provider:
+Add an OpenAI-compatible provider:
 
 ```bash
 curl -s http://localhost:3000/admin/providers \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"slug":"company-ai","name":"Company AI","baseUrl":"https://ai.company.com/v1","apiKey":"PROVIDER_API_KEY"}'
+  -d '{"slug":"company-ai","name":"Company AI","baseUrl":"https://ai.example.com/v1","apiKey":"PROVIDER_API_KEY"}'
 ```
 
-For local 9Router, use the private service URL:
-
-```bash
-curl -s http://localhost:3000/admin/providers \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"slug":"9router","name":"9Router Local","baseUrl":"http://9router:20128/v1","apiKey":"LOCAL_9ROUTER_TOKEN"}'
-```
-
-Create and sync a model alias to LiteLLM:
+Create and sync a model alias:
 
 ```bash
 curl -s http://localhost:3000/admin/model-aliases \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"alias":"code-premium","providerId":"PROVIDER_ID","upstreamModel":"openai/gemini-2.5-pro"}'
+  -d '{"alias":"code-premium","providerId":"PROVIDER_ID","upstreamModel":"openai/provider-model-id"}'
 ```
-
-Provider API keys stored through the registry are encrypted at rest with `PROVIDER_SECRET_KEY`. List responses only return `apiKeyLast4`.
-
-Rotate a provider key and resync aliases:
-
-```bash
-curl -s http://localhost:3000/admin/providers/PROVIDER_ID/rotate-key \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"apiKey":"NEW_PROVIDER_API_KEY","syncAliases":true}'
-```
-
-Disable a provider and its aliases:
-
-```bash
-curl -s -X DELETE http://localhost:3000/admin/providers/PROVIDER_ID \
-  -H "Authorization: Bearer $ADMIN_TOKEN"
-```
-
-The dashboard at `/dashboard` is a lightweight operator UI for the same API. It stores only the admin token in the browser's local storage and should be exposed only behind VPN/internal auth.
 
 Call LiteLLM with the returned virtual key:
 
@@ -145,62 +172,76 @@ curl http://localhost:4000/v1/chat/completions \
   -d '{"model":"code-premium","messages":[{"role":"user","content":"Say ok"}]}'
 ```
 
-## Boundary
+More examples are in [docs/USAGE.md](docs/USAGE.md).
 
-LiteLLM virtual keys are the real user keys. The control plane does not mint independent fake proxy keys. It calls LiteLLM admin APIs to create/revoke keys, then stores hashed local metadata for UX/reference. LiteLLM handles request-time auth, model allowlists, budgets supported by LiteLLM, and spend tracking. Provider registry aliases are synced into LiteLLM through LiteLLM admin model APIs; static `litellm_config.yaml` aliases remain as bootstrapping defaults.
+## Project Structure
 
-## Codex Configuration
-
-Point Codex or other OpenAI-compatible tooling at LiteLLM:
-
-```toml
-model = "code-premium"
-
-[providers.team_llm_gateway]
-name = "team_llm_gateway"
-base_url = "http://localhost:4000/v1"
-api_key_env_var = "TEAM_LLM_GATEWAY_API_KEY"
-wire_api = "chat"
+```text
+apps/api/          Fastify control-plane API
+apps/web/          React/Vite admin console
+apps/litellm/      LiteLLM container wrapper
+docs/              Architecture, operations, usage, deployment, and roadmap docs
+prisma/            Loom application database schema
+scripts/smoke/     End-to-end smoke scripts
+litellm_config.yaml LiteLLM bootstrap configuration
+docker-compose.yml Local and deployment-oriented service stack
 ```
 
-Then:
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [Configuration](docs/CONFIGURATION.md)
+- [Usage](docs/USAGE.md)
+- [Development](docs/DEVELOPMENT.md)
+- [Operations](docs/OPERATIONS.md)
+- [Coolify deployment](docs/COOLIFY_DEPLOY.md)
+- [Codex client usage](docs/CODEX_USAGE.md)
+- [Roadmap](docs/ROADMAP.md)
+
+## Testing
 
 ```bash
-export TEAM_LLM_GATEWAY_API_KEY=sk_PERSONAL_LITELLM_KEY
+npm run lint
+npm test
+npm run build
 ```
 
-See [docs/CODEX_USAGE.md](docs/CODEX_USAGE.md) for more examples.
-
-## Smoke Test
-
-With a real 9Router-compatible upstream configured:
+Smoke tests require a running stack and suitable environment values:
 
 ```bash
 npm run smoke:gateway
-```
-
-`ROUTER_*_MODEL` values should be LiteLLM model strings such as `openai/<9router-model-id>`. `ROUTER_BASE_URL` and `ROUTER_API_KEY` are preferred; Docker Compose maps legacy `NINE_ROUTER_BASE_URL` and `NINE_ROUTER_API_KEY` into those names if needed.
-
-Mocked upstream mode requires LiteLLM to be started with `ROUTER_BASE_URL=http://host.docker.internal:5055/v1` and `ROUTER_*_MODEL` values such as `openai/mock-premium`, then:
-
-```bash
-SMOKE_MOCK_UPSTREAM=1 npm run smoke:gateway
-```
-
-Real provider registry smoke:
-
-```bash
-REAL_PROVIDER_BASE_URL=https://ai.company.com/v1 \
-REAL_PROVIDER_API_KEY=provider-key \
-REAL_PROVIDER_MODEL=openai/gemini-2.5-pro \
 npm run smoke:real-provider
 ```
 
-## Development
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) and [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
-```bash
-npm test
-npm run lint
-npm run build
-npm run format:check
-```
+## Deployment Notes
+
+Loom is intended to run behind a reverse proxy. Expose the LiteLLM service to developer tools and keep the admin API/dashboard behind VPN, IP allowlist, or upstream authentication.
+
+Production basics:
+
+- Store secrets outside git.
+- Use long random values for admin and encryption secrets.
+- Keep Postgres and Redis private.
+- Keep provider credentials authorized for team use.
+- Run smoke tests after provider or alias changes.
+- Decide retention for usage and audit records before broad rollout.
+
+See [docs/COOLIFY_DEPLOY.md](docs/COOLIFY_DEPLOY.md) for the included Coolify-oriented deployment notes.
+
+## Roadmap
+
+Implemented work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md). Notable remaining areas include retention jobs, alerts, Redis-backed rate limits, monthly reports, deployment templates beyond the current Compose/Coolify path, and more polished dashboard workflows.
+
+## Contributing
+
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), run the checks above, and keep security-sensitive changes conservative.
+
+## Security
+
+Please do not open public issues for vulnerabilities or leaked credentials. See [SECURITY.md](SECURITY.md) for the reporting policy and project security boundaries.
+
+## License
+
+Loom is released under the [MIT License](LICENSE).

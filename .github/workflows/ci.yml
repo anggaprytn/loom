@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  test:
+    name: Test and build
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: tlg
+          POSTGRES_PASSWORD: tlg
+          POSTGRES_DB: team_llm_gateway
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U tlg"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://tlg:tlg@localhost:5432/team_llm_gateway?schema=app
+      DIRECT_URL: postgresql://tlg:tlg@localhost:5432/team_llm_gateway?schema=app
+      ADMIN_TOKEN: ci-admin-token-please-change
+      API_KEY_PEPPER: ci-api-key-pepper-please-change
+      PROVIDER_SECRET_KEY: ci-provider-secret-key-32-chars-minimum
+      LITELLM_PROXY_URL: http://localhost:4000
+      LITELLM_MASTER_KEY: sk-ci-litellm-master-key
+      ROUTER_BASE_URL: http://localhost:5055/v1
+      ROUTER_API_KEY: ci-router-key
+      ROUTER_PREMIUM_MODEL: openai/mock-premium
+      ROUTER_BALANCED_MODEL: openai/mock-balanced
+      ROUTER_FAST_MODEL: openai/mock-fast
+      ROUTER_FALLBACK_MODEL: openai/mock-fallback
+      ROUTER_AGENT_PREMIUM_MODEL: openai/mock-agent-premium
+      ROUTER_AGENT_CHEAP_MODEL: openai/mock-agent-cheap
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
