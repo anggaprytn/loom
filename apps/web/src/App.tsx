@@ -8,6 +8,8 @@ import {
   Loader2,
   LogOut,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   Route,
   Search,
@@ -15,7 +17,7 @@ import {
   Settings,
   UserPlus,
 } from 'lucide-react';
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   api,
   ApiKey,
@@ -62,6 +64,7 @@ type ModalState =
 
 const emptyData: DashboardData = { users: [], providers: [], aliases: [], keys: [], usage: null };
 const tokenKey = 'tlg_admin_token';
+const sidebarCollapsedKey = 'tlg_sidebar_collapsed';
 const sectionKeys: SectionKey[] = ['users', 'providers', 'aliases', 'keys', 'usage'];
 const emptySectionStates = Object.fromEntries(
   sectionKeys.map((section) => [section, { status: 'idle', lastLoadedAt: null }]),
@@ -109,6 +112,9 @@ const nav: Array<{ id: Tab; label: string; description: string; icon: ReactNode 
 export function App() {
   const [tab, setTab] = useState<Tab>('overview');
   const [token, setToken] = useState(() => localStorage.getItem(tokenKey) || '');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => localStorage.getItem(sidebarCollapsedKey) === 'true',
+  );
   const [data, setData] = useState<DashboardData>(emptyData);
   const [errors, setErrors] = useState<Partial<Record<SectionKey, string>>>({});
   const [sectionStates, setSectionStates] = useState<SectionStates>(emptySectionStates);
@@ -118,6 +124,7 @@ export function App() {
   const [modal, setModal] = useState<ModalState>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const autoLoadStarted = useRef(false);
   const current = nav.find((item) => item.id === tab)!;
   const hasLoaded = Boolean(lastRefresh);
   const hasFailures = Object.keys(errors).length > 0;
@@ -228,6 +235,12 @@ export function App() {
     }
   };
 
+  useEffect(() => {
+    if (autoLoadStarted.current || !token.trim()) return;
+    autoLoadStarted.current = true;
+    void refresh();
+  }, []);
+
   const run = async (
     action: () => Promise<void>,
     success: string,
@@ -263,16 +276,40 @@ export function App() {
     addActivity('Token cleared', 'warn');
   };
 
+  const toggleSidebar = () => {
+    setSidebarCollapsed((collapsed) => {
+      const next = !collapsed;
+      localStorage.setItem(sidebarCollapsedKey, String(next));
+      return next;
+    });
+  };
+
   return (
-    <div className="app">
-      <aside className="sidebar">
-        <div className="brand">
-          <h1>Loom Admin</h1>
-          <p>Internal LLM gateway control plane for providers, aliases, keys, and usage.</p>
+    <div className={`app ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <aside className="sidebar" aria-label="Admin navigation">
+        <div className="sidebar-head">
+          <div className="brand">
+            <h1>Loom Admin</h1>
+            <p>Internal LLM gateway control plane for providers, aliases, keys, and usage.</p>
+          </div>
+          <button
+            className="sidebar-toggle"
+            type="button"
+            onClick={toggleSidebar}
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+          </button>
         </div>
         <nav className="nav" aria-label="Admin sections">
           {nav.map((item) => (
-            <button key={item.id} aria-selected={tab === item.id} onClick={() => setTab(item.id)}>
+            <button
+              key={item.id}
+              aria-selected={tab === item.id}
+              onClick={() => setTab(item.id)}
+              title={sidebarCollapsed ? item.label : undefined}
+            >
               {item.icon}
               <span>{item.label}</span>
             </button>

@@ -160,6 +160,10 @@ textarea {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 252px 1fr;
+  transition: grid-template-columns 0.16s ease;
+}
+.app.sidebar-collapsed {
+  grid-template-columns: 72px 1fr;
 }
 .sidebar {
   position: sticky;
@@ -168,9 +172,18 @@ textarea {
   padding: 20px 14px;
   border-right: 1px solid var(--border);
   background: #fbfcfa;
+  overflow: hidden;
+}
+.sidebar-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding-bottom: 14px;
 }
 .brand {
-  padding: 4px 8px 18px;
+  min-width: 0;
+  flex: 1;
+  padding: 4px 0 0 8px;
 }
 .brand h1 {
   margin: 0;
@@ -183,6 +196,19 @@ textarea {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
+}
+.sidebar-toggle {
+  width: 36px;
+  min-width: 36px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border-color: var(--border);
+}
+.sidebar-toggle:hover {
+  color: var(--text);
+  background: var(--surface-strong);
+  border-color: var(--border-strong);
 }
 .nav {
   display: grid;
@@ -201,6 +227,29 @@ textarea {
   background: var(--brand-soft);
   color: var(--brand-strong);
   box-shadow: none;
+}
+.sidebar-collapsed .sidebar {
+  padding-inline: 12px;
+}
+.sidebar-collapsed .sidebar-head {
+  justify-content: center;
+  padding-bottom: 14px;
+}
+.sidebar-collapsed .brand {
+  display: none;
+}
+.sidebar-collapsed .nav button {
+  height: 42px;
+  justify-content: center;
+  padding: 0;
+}
+.sidebar-collapsed .nav button span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 .shell {
   min-width: 0;
@@ -946,14 +995,44 @@ button.sort {
   .app {
     grid-template-columns: 1fr;
   }
+  .app.sidebar-collapsed {
+    grid-template-columns: 1fr;
+  }
   .sidebar {
     position: static;
     height: auto;
     border-right: 0;
     border-bottom: 1px solid var(--border);
+    overflow: visible;
+  }
+  .sidebar-head {
+    align-items: center;
+    padding-bottom: 14px;
+  }
+  .sidebar-collapsed .sidebar {
+    padding: 20px 14px;
+  }
+  .sidebar-collapsed .sidebar-head {
+    justify-content: space-between;
+  }
+  .sidebar-collapsed .brand {
+    display: block;
   }
   .nav {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .sidebar-collapsed .nav button {
+    height: auto;
+    justify-content: flex-start;
+    padding: 9px 10px;
+  }
+  .sidebar-collapsed .nav button span {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+    white-space: nowrap;
   }
   .topbar {
     position: static;
