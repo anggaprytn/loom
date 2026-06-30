@@ -267,11 +267,11 @@ Implemented work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md). Notable remai
 
 ## Contributing
 
-Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), run the checks above, and keep security-sensitive changes conservative.
+Contributions are welcome. Start with [CONTRIBUTING.md](docs/CONTRIBUTING.md), run the checks above, and keep security-sensitive changes conservative.
 
 ## Security
 
-Please do not open public issues for vulnerabilities or leaked credentials. See [SECURITY.md](SECURITY.md) for the reporting policy and project security boundaries.
+Please do not open public issues for vulnerabilities or leaked credentials. See [SECURITY.md](docs/SECURITY.md) for the reporting policy and project security boundaries.
 
 ## License
 
