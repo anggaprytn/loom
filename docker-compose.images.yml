@@ -1,0 +1,64 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tlg}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tlg}
+      POSTGRES_DB: ${POSTGRES_DB:-team_llm_gateway}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -p 5432 -U "$${POSTGRES_USER}"']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    image: ghcr.io/anggaprytn/loom-api:${LOOM_VERSION:-latest}
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://tlg:tlg@postgres:5432/team_llm_gateway?schema=app}
+      DIRECT_URL: ${DIRECT_URL:-postgresql://tlg:tlg@postgres:5432/team_llm_gateway?schema=app}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      LITELLM_PROXY_URL: ${LITELLM_PROXY_URL:-http://litellm:4000}
+      ROUTER_BASE_URL: ${ROUTER_BASE_URL:-${NINE_ROUTER_BASE_URL:-http://9router:20128/v1}}
+      ROUTER_API_KEY: ${ROUTER_API_KEY:-${NINE_ROUTER_API_KEY:-}}
+    ports:
+      - '${LOOM_ADMIN_PORT:-3000}:3000'
+    depends_on:
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_started
+    command: >
+      sh -c "node -e \"const net=require('net');let n=0;const wait=()=>{const s=net.connect(5432,'postgres');s.on('connect',()=>process.exit(0));s.on('error',()=>{if(++n>60)process.exit(1);setTimeout(wait,1000);});};wait();\"
+      && npx prisma migrate deploy --schema prisma/schema.prisma
+      && node apps/api/dist/server.js"
+
+  litellm:
+    image: ghcr.io/anggaprytn/loom-litellm:${LOOM_VERSION:-latest}
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${LITELLM_DATABASE_URL:-postgresql://tlg:tlg@postgres:5432/team_llm_gateway?schema=litellm}
+      ROUTER_BASE_URL: ${ROUTER_BASE_URL:-${NINE_ROUTER_BASE_URL:-http://9router:20128/v1}}
+      ROUTER_API_KEY: ${ROUTER_API_KEY:-${NINE_ROUTER_API_KEY:-}}
+    command: ['--config', '/app/config.yaml', '--port', '4000']
+    ports:
+      - '${LOOM_GATEWAY_PORT:-4000}:4000'
+    depends_on:
+      postgres:
+        condition: service_started
+
+volumes:
+  postgres_data:

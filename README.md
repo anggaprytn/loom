@@ -59,16 +59,14 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for more detail.
 
 Prerequisites:
 
-- Node.js 20 or newer
-- npm
 - Docker and Docker Compose
 - An OpenAI-compatible upstream provider URL and API key
 
+For the easiest install path, use the prebuilt GitHub Container Registry images:
+
 ```bash
 cp .env.example .env
-npm install
-npm run prisma:generate
-docker compose up --build
+docker compose -f docker-compose.images.yml up -d
 ```
 
 Before starting the stack, edit `.env`:
@@ -77,7 +75,40 @@ Before starting the stack, edit `.env`:
 - Set `ROUTER_BASE_URL` and `ROUTER_API_KEY` for your upstream OpenAI-compatible provider.
 - Set the `ROUTER_*_MODEL` values to model strings accepted by LiteLLM for that upstream.
 
-The Compose stack uses `expose`, not host `ports`, so it does not publish `localhost:3000` or `localhost:4000` by default. Route traffic through your reverse proxy, or add a local override if you want direct host ports during development.
+The image-based Compose file publishes:
+
+- Admin API and dashboard: `http://localhost:3000`
+- LiteLLM gateway: `http://localhost:4000`
+
+To update an image-based install:
+
+```bash
+docker compose -f docker-compose.images.yml pull
+docker compose -f docker-compose.images.yml up -d
+```
+
+To pin a release, set `LOOM_VERSION` in `.env`, for example:
+
+```bash
+LOOM_VERSION=v0.1.0
+```
+
+The default `docker-compose.yml` remains build-oriented and uses `expose`, not host `ports`, so it does not publish `localhost:3000` or `localhost:4000` by default. Route traffic through your reverse proxy, or use `docker-compose.images.yml` for direct local ports.
+
+## Build From Source
+
+Prerequisites:
+
+- Node.js 20 or newer
+- npm
+- Docker and Docker Compose
+
+```bash
+cp .env.example .env
+npm install
+npm run prisma:generate
+docker compose up --build
+```
 
 ## Local Development
 
