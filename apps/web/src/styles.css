@@ -200,7 +200,7 @@ textarea {
 .nav button[aria-selected='true'] {
   background: var(--brand-soft);
   color: var(--brand-strong);
-  box-shadow: inset 3px 0 0 var(--brand);
+  box-shadow: none;
 }
 .shell {
   min-width: 0;
@@ -255,6 +255,9 @@ textarea {
 }
 .grid.three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.grid.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 .stack {
   margin-top: 16px;
@@ -368,6 +371,20 @@ textarea {
 .actions {
   margin-top: 14px;
 }
+.link-button {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  display: inline-block;
+  text-align: left;
+  white-space: normal;
+}
+.link-button:hover {
+  color: var(--brand);
+  background: transparent;
+}
 .row.tight {
   gap: 6px;
   flex-wrap: nowrap;
@@ -399,6 +416,13 @@ pre {
 .strong {
   font-weight: 800;
 }
+.compact-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
 
 .table-tools {
   display: flex;
@@ -417,11 +441,6 @@ pre {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-}
-.filters select {
-  width: 150px;
-  min-height: 34px;
-  font-size: 13px;
 }
 .search {
   width: 240px;
@@ -444,6 +463,72 @@ pre {
 .search svg {
   width: 15px;
   height: 15px;
+}
+.search.compact {
+  width: 100%;
+  min-height: 32px;
+}
+.searchable-select {
+  position: relative;
+  width: 100%;
+  min-width: 150px;
+}
+.filters .searchable-select {
+  width: 170px;
+}
+.searchable-select-trigger {
+  width: 100%;
+  min-height: 38px;
+  justify-content: space-between;
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 650;
+  text-align: left;
+  white-space: normal;
+}
+.searchable-select-trigger span {
+  display: grid;
+  gap: 2px;
+}
+.searchable-select-trigger small,
+.searchable-select-list small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.searchable-select-popover {
+  position: absolute;
+  z-index: 12;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 16px 42px rgba(23, 32, 27, 0.18);
+}
+.searchable-select-list {
+  max-height: 220px;
+  overflow: auto;
+  margin-top: 6px;
+  display: grid;
+  gap: 3px;
+}
+.searchable-select-list button {
+  min-height: 34px;
+  justify-content: flex-start;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  white-space: normal;
+}
+.searchable-select-list button[aria-selected='true'],
+.searchable-select-list button:hover {
+  background: var(--brand-soft);
+  color: var(--brand-strong);
 }
 
 .table-wrap {
@@ -637,9 +722,11 @@ button.sort {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   gap: 14px;
+  align-items: stretch;
 }
 .flow-card {
   align-content: start;
+  min-height: 286px;
   padding: 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -712,14 +799,12 @@ button.sort {
   margin-top: 10px;
   flex-wrap: wrap;
 }
-.pagination select {
-  width: 112px;
-  min-height: 34px;
-  font-size: 13px;
+.page-size-select {
+  width: 118px;
 }
 .usage-filters {
   display: grid;
-  grid-template-columns: 180px 160px 160px auto;
+  grid-template-columns: 190px 170px 160px 160px auto;
   gap: 10px;
   align-items: end;
   margin-bottom: 14px;
@@ -883,6 +968,7 @@ button.sort {
   }
   .grid.two,
   .grid.three,
+  .grid.four,
   .flow-grid {
     grid-template-columns: 1fr;
   }
@@ -902,7 +988,7 @@ button.sort {
     align-items: stretch;
   }
   .filters,
-  .filters select,
+  .filters .searchable-select,
   .search {
     width: 100%;
   }

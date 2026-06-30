@@ -10,6 +10,7 @@ import {
   aggregateLiteLlmUsage,
   groupLiteLlmUsage,
   normalizeLiteLlmSpendLog,
+  type LiteLlmUsageRecord,
 } from '../services/litellmUsageService.js';
 import { normalizeAllowedModels } from '../services/modelPolicy.js';
 import {
@@ -125,6 +126,41 @@ type AdminOperationRecord = {
   error?: unknown;
   startedAt: Date;
   finishedAt?: Date | null;
+};
+
+type UsageContextUser = {
+  id: string;
+  email: string;
+  name: string;
+  role?: string | null;
+  teamId?: string | null;
+};
+
+type UsageContextTeam = {
+  id: string;
+  slug: string;
+  name: string;
+};
+
+type UsageContextKey = {
+  id: string;
+  prefix: string;
+  litellmKeyAlias?: string | null;
+  litellmKeyId?: string | null;
+  name: string;
+  status: string;
+  userId: string;
+  teamId?: string | null;
+  lastUsedAt?: Date | string | null;
+  revokedAt?: Date | string | null;
+  createdAt?: Date | string | null;
+};
+
+type UsageContextBudget = {
+  userId?: string | null;
+  teamId?: string | null;
+  monthlyTokenLimit?: number | null;
+  monthlyCostLimit?: Prisma.Decimal | string | number | null;
 };
 
 const sectionRecovery: Record<string, string> = {
@@ -817,7 +853,7 @@ export async function adminRoutes(
       });
     }
 
-    const alias = await prisma.modelAlias.create({
+    let alias = await prisma.modelAlias.create({
       data: {
         alias: input.alias,
         providerId: provider.id,
@@ -831,6 +867,7 @@ export async function adminRoutes(
     if (input.syncToLiteLlm && alias.enabled && provider.enabled) {
       const target = aliasToTarget(alias, env.PROVIDER_SECRET_KEY);
       await litellmAdmin.upsertModel(buildLiteLlmModelPayload(target));
+      alias = await markAliasSynced(prisma, alias.id);
     }
 
     return reply.code(201).send(formatModelAlias(alias));
@@ -848,12 +885,19 @@ export async function adminRoutes(
 
     for (const alias of aliases) {
       await syncAliasToLiteLlm(alias, litellmAdmin, env.PROVIDER_SECRET_KEY);
+      const syncedAt = new Date();
+      await prisma.modelAlias.update({
+        where: { id: alias.id },
+        data: { lastSyncedAt: syncedAt },
+        include: { provider: true },
+      });
       results.push({
         id: alias.id,
         alias: alias.alias,
         provider: alias.provider.slug,
         upstreamModel: alias.upstreamModel,
         synced: true,
+        lastSyncedAt: syncedAt,
       });
     }
 
@@ -902,7 +946,7 @@ export async function adminRoutes(
       }
     }
 
-    const alias = await prisma.modelAlias.update({
+    let alias = await prisma.modelAlias.update({
       where: { id: params.id },
       data: {
         alias: input.alias,
@@ -916,6 +960,7 @@ export async function adminRoutes(
 
     if (input.syncToLiteLlm && alias.enabled && alias.provider.enabled) {
       await syncAliasToLiteLlm(alias, litellmAdmin, env.PROVIDER_SECRET_KEY);
+      alias = await markAliasSynced(prisma, alias.id);
     }
 
     return reply.send(formatModelAlias(alias));
@@ -960,12 +1005,10 @@ export async function adminRoutes(
     try {
       const target = aliasToTarget(alias, env.PROVIDER_SECRET_KEY);
       await litellmAdmin.upsertModel(buildLiteLlmModelPayload(target));
+      const syncedAlias = await markAliasSynced(prisma, alias.id);
       const result = {
-        id: alias.id,
-        alias: alias.alias,
+        ...formatModelAlias(syncedAlias),
         synced: true,
-        provider: alias.provider.slug,
-        upstreamModel: alias.upstreamModel,
         message: `Alias synced: ${alias.alias}.`,
         recovery: 'No recovery needed.',
       };
@@ -1184,8 +1227,8 @@ async function getUsageSummary(
       source: 'litellm',
       totals: aggregateLiteLlmUsage(records),
       byDay: dailyLiteLlmRollup(records),
-      byUser: groupLiteLlmUsage(records, 'userId'),
-      byTeam: groupLiteLlmUsage(records, 'teamId'),
+      ...(await enrichedLiteLlmUsage(prisma, records)),
+      rawDailyRollup: dailyLiteLlmRollup(records),
       byModel: groupLiteLlmUsage(records, 'model'),
       byKey: groupLiteLlmUsage(records, 'keyAlias'),
     };
@@ -1411,6 +1454,10 @@ async function syncProviderAliases(
 
   for (const alias of aliases) {
     await syncAliasToLiteLlm(alias, litellmAdmin, providerSecretKey);
+    await prisma.modelAlias.update({
+      where: { id: alias.id },
+      data: { lastSyncedAt: new Date() },
+    });
   }
 
   return aliases.length;
@@ -1435,12 +1482,21 @@ async function syncAliasToLiteLlm(
   await litellmAdmin.upsertModel(buildLiteLlmModelPayload(target));
 }
 
+async function markAliasSynced(prisma: PrismaLike, id: string) {
+  return prisma.modelAlias.update({
+    where: { id },
+    data: { lastSyncedAt: new Date() },
+    include: { provider: true },
+  });
+}
+
 function formatModelAlias(alias: {
   id: string;
   alias: string;
   upstreamModel: string;
   enabled: boolean;
   description: string | null;
+  lastSyncedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
   provider: {
@@ -1459,6 +1515,7 @@ function formatModelAlias(alias: {
     upstreamModel: alias.upstreamModel,
     enabled: alias.enabled,
     description: alias.description,
+    lastSyncedAt: alias.lastSyncedAt,
     createdAt: alias.createdAt,
     updatedAt: alias.updatedAt,
     provider: {
@@ -1610,6 +1667,239 @@ function dailyLiteLlmRollup(records: Awaited<ReturnType<typeof getLiteLlmUsage>>
     date,
     ...aggregateLiteLlmUsage(bucketRecords),
   }));
+}
+
+async function enrichedLiteLlmUsage(
+  prisma: PrismaLike,
+  records: Awaited<ReturnType<typeof getLiteLlmUsage>>,
+) {
+  const context = await usageAttributionContext(prisma);
+  const attributed = records.map((record) => {
+    const key =
+      (record.keyAlias && context.keysByAlias.get(record.keyAlias)) ||
+      (record.keyId && context.keysById.get(record.keyId)) ||
+      null;
+    const userId = record.userId ?? key?.userId ?? null;
+    const teamId = record.teamId ?? key?.teamId ?? null;
+    const user = userId ? context.users.get(userId) : null;
+    const team = teamId
+      ? context.teams.get(teamId)
+      : user?.teamId
+        ? context.teams.get(user.teamId)
+        : null;
+
+    return { ...record, userId, teamId: team?.id ?? teamId, user, team, key };
+  });
+
+  const byUser = groupAttributedUsage(
+    attributed,
+    (record) => record.user?.id ?? record.userId ?? 'unknown',
+  )
+    .map((row) => ({
+      userId: row.id === 'unknown' ? null : row.id,
+      user: row.records[0]?.user ?? null,
+      team: row.records[0]?.team ?? null,
+      keyCount: new Set(
+        row.records
+          .map((record) => record.key?.id ?? record.keyAlias ?? record.keyId)
+          .filter(Boolean),
+      ).size,
+      modelBreakdown: aggregateBreakdown(row.records, (record) => record.model),
+      keyBreakdown: aggregateBreakdown(
+        row.records,
+        (record) => record.key?.name ?? record.keyAlias ?? record.keyId ?? 'Unknown key',
+      ),
+      daily: dailyLiteLlmRollup(row.records),
+      anomalies: usageAnomalies(row.records),
+      budget: row.id === 'unknown' ? null : (context.budgetsByUser.get(row.id) ?? null),
+      ...aggregateLiteLlmUsage(row.records),
+    }))
+    .sort((a, b) => Number(b.estimatedCost) - Number(a.estimatedCost));
+
+  const byTeam = groupAttributedUsage(
+    attributed,
+    (record) => record.team?.id ?? record.teamId ?? 'unknown',
+  )
+    .map((row) => ({
+      teamId: row.id === 'unknown' ? null : row.id,
+      team: row.records[0]?.team ?? null,
+      userCount: new Set(
+        row.records.map((record) => record.user?.id ?? record.userId).filter(Boolean),
+      ).size,
+      modelBreakdown: aggregateBreakdown(row.records, (record) => record.model),
+      budget: row.id === 'unknown' ? null : (context.budgetsByTeam.get(row.id) ?? null),
+      ...aggregateLiteLlmUsage(row.records),
+    }))
+    .sort((a, b) => Number(b.estimatedCost) - Number(a.estimatedCost));
+
+  const byKey = groupAttributedUsage(
+    attributed,
+    (record) => record.key?.id ?? record.keyAlias ?? record.keyId ?? 'unknown',
+  )
+    .map((row) => ({
+      keyId: row.id === 'unknown' ? null : row.id,
+      key: row.records[0]?.key ?? null,
+      user: row.records[0]?.user ?? null,
+      team: row.records[0]?.team ?? null,
+      modelBreakdown: aggregateBreakdown(row.records, (record) => record.model),
+      ...aggregateLiteLlmUsage(row.records),
+    }))
+    .sort((a, b) => Number(b.estimatedCost) - Number(a.estimatedCost));
+
+  return {
+    byUser,
+    byTeam,
+    byKey,
+    topUsersByCost: byUser.slice(0, 10),
+    topUsersByTokens: [...byUser].sort((a, b) => b.totalTokens - a.totalTokens).slice(0, 10),
+    unknownAttribution: byUser.find((row) => row.userId === null) ?? null,
+    inactive: inactiveUsage(context, attributed),
+  };
+}
+
+async function usageAttributionContext(prisma: PrismaLike) {
+  const userDelegate = usageDelegate(prisma, 'user');
+  const teamDelegate = usageDelegate(prisma, 'team');
+  const keyDelegate = usageDelegate(prisma, 'apiKey');
+  const budgetDelegate = usageDelegate(prisma, 'budgetLimit');
+  const [users, teams, keys, budgets] = await Promise.all([
+    (userDelegate?.findMany?.({
+      select: { id: true, email: true, name: true, role: true, teamId: true, createdAt: true },
+    }) ?? []) as Promise<UsageContextUser[]> | UsageContextUser[],
+    (teamDelegate?.findMany?.({
+      select: { id: true, slug: true, name: true },
+    }) ?? []) as Promise<UsageContextTeam[]> | UsageContextTeam[],
+    (keyDelegate?.findMany?.({
+      select: {
+        id: true,
+        prefix: true,
+        litellmKeyAlias: true,
+        litellmKeyId: true,
+        name: true,
+        status: true,
+        userId: true,
+        teamId: true,
+        lastUsedAt: true,
+        revokedAt: true,
+        createdAt: true,
+      },
+    }) ?? []) as Promise<UsageContextKey[]> | UsageContextKey[],
+    (budgetDelegate?.findMany?.({
+      where: { active: true },
+      orderBy: { createdAt: 'desc' },
+    }) ?? []) as Promise<UsageContextBudget[]> | UsageContextBudget[],
+  ]);
+
+  return {
+    users: new Map(users.map((user) => [user.id, user])),
+    teams: new Map(teams.map((team) => [team.id, team])),
+    keysById: new Map(keys.map((key) => [key.id, key])),
+    keysByAlias: new Map(
+      keys
+        .flatMap((key) => [
+          key.litellmKeyAlias ? ([key.litellmKeyAlias, key] as const) : null,
+          key.litellmKeyId ? ([key.litellmKeyId, key] as const) : null,
+          [key.id, key] as const,
+        ])
+        .filter((entry): entry is readonly [string, UsageContextKey] => Boolean(entry)),
+    ),
+    budgetsByUser: new Map(
+      budgets
+        .filter((budget) => budget.userId)
+        .map((budget) => [budget.userId as string, formatBudget(budget)]),
+    ),
+    budgetsByTeam: new Map(
+      budgets
+        .filter((budget) => budget.teamId)
+        .map((budget) => [budget.teamId as string, formatBudget(budget)]),
+    ),
+  };
+}
+
+function usageDelegate(prisma: PrismaLike, name: string) {
+  return (
+    prisma as unknown as Record<string, { findMany?: (args?: unknown) => Promise<unknown[]> }>
+  )[name];
+}
+
+function groupAttributedUsage<T>(records: T[], getKey: (record: T) => string) {
+  const buckets = new Map<string, T[]>();
+  for (const record of records) {
+    const key = getKey(record);
+    buckets.set(key, [...(buckets.get(key) ?? []), record]);
+  }
+
+  return [...buckets.entries()].map(([id, bucketRecords]) => ({ id, records: bucketRecords }));
+}
+
+function aggregateBreakdown<T extends LiteLlmUsageRecord>(
+  records: T[],
+  getKey: (record: T) => string,
+) {
+  return groupAttributedUsage(records, getKey)
+    .map((row) => ({
+      name: row.id,
+      ...aggregateLiteLlmUsage(row.records),
+    }))
+    .sort((a, b) => Number(b.estimatedCost) - Number(a.estimatedCost));
+}
+
+function usageAnomalies(
+  records: Array<{ timestamp: Date; estimatedCost: string; status: string }>,
+) {
+  const now = Date.now();
+  const day = 24 * 60 * 60 * 1000;
+  const currentWeek = records.filter((record) => now - record.timestamp.valueOf() <= 7 * day);
+  const previousWeek = records.filter((record) => {
+    const age = now - record.timestamp.valueOf();
+    return age > 7 * day && age <= 14 * day;
+  });
+  const currentCost = sumCost(currentWeek);
+  const previousCost = sumCost(previousWeek);
+  const errors = records.filter((record) => record.status === 'error').length;
+  const anomalies: string[] = [];
+
+  if (previousCost > 0 && currentCost >= previousCost * 3) {
+    anomalies.push(`Cost is ${Math.round((currentCost / previousCost) * 100)}% of previous week.`);
+  }
+  if (errors > 0) {
+    anomalies.push(`${errors} failed requests in selected range.`);
+  }
+
+  return anomalies;
+}
+
+function inactiveUsage(
+  context: Awaited<ReturnType<typeof usageAttributionContext>>,
+  records: Array<{ user?: UsageContextUser | null; key?: UsageContextKey | null }>,
+) {
+  const activeUserIds = new Set(records.map((record) => record.user?.id).filter(Boolean));
+  const activeKeyIds = new Set(records.map((record) => record.key?.id).filter(Boolean));
+  const usersWithNoUsage = [...context.users.values()]
+    .filter((user: { id: string }) => !activeUserIds.has(user.id))
+    .slice(0, 20);
+  const keysNeverUsed = [...context.keysById.values()]
+    .filter(
+      (key: { id: string; lastUsedAt?: Date | string | null }) =>
+        !key.lastUsedAt && !activeKeyIds.has(key.id),
+    )
+    .slice(0, 20);
+
+  return { usersWithNoUsage, keysNeverUsed };
+}
+
+function sumCost(records: Array<{ estimatedCost: string }>) {
+  return records.reduce((total, record) => total + Number(record.estimatedCost || 0), 0);
+}
+
+function formatBudget(budget: Record<string, unknown>) {
+  return {
+    ...budget,
+    monthlyCostLimit:
+      budget.monthlyCostLimit instanceof Prisma.Decimal
+        ? decimalToString(budget.monthlyCostLimit)
+        : String(budget.monthlyCostLimit ?? '0.00000000'),
+  };
 }
 
 function decimalToString(value: Prisma.Decimal | null | undefined): string {

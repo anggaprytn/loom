@@ -44,6 +44,7 @@ export type ModelAlias = {
   upstreamModel: string;
   enabled: boolean;
   description?: string | null;
+  lastSyncedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
   provider?: Provider;
@@ -52,10 +53,25 @@ export type ModelAlias = {
 export type UsageGroup = {
   [key: string]: unknown;
   requests: number;
+  errors?: number;
   promptTokens?: number;
   completionTokens?: number;
   totalTokens: number;
   estimatedCost: string | number;
+  lastUsage?: string | null;
+  user?: Pick<User, 'id' | 'email' | 'name' | 'role' | 'teamId'> | null;
+  team?: { id: string; slug: string; name: string } | null;
+  key?: Pick<ApiKey, 'id' | 'name' | 'status' | 'prefix' | 'litellmKeyAlias' | 'lastUsedAt'> | null;
+  modelBreakdown?: UsageGroup[];
+  keyBreakdown?: UsageGroup[];
+  daily?: UsageGroup[];
+  budget?: {
+    monthlyCostLimit?: string | number | null;
+    monthlyTokenLimit?: number | null;
+  } | null;
+  anomalies?: string[];
+  keyCount?: number;
+  userCount?: number;
 };
 
 export type Usage = {
@@ -69,6 +85,15 @@ export type Usage = {
   byModel?: UsageGroup[];
   byTeam?: UsageGroup[];
   byKey?: UsageGroup[];
+  byDay?: UsageGroup[];
+  rawDailyRollup?: UsageGroup[];
+  topUsersByCost?: UsageGroup[];
+  topUsersByTokens?: UsageGroup[];
+  unknownAttribution?: UsageGroup | null;
+  inactive?: {
+    usersWithNoUsage?: User[];
+    keysNeverUsed?: ApiKey[];
+  };
 };
 
 export type SectionKey = 'users' | 'providers' | 'aliases' | 'keys' | 'usage';

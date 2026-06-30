@@ -49,6 +49,7 @@ describe('empty JSON action requests', () => {
       alias: 'code-premium',
       synced: true,
     });
+    expect(response.json().lastSyncedAt).toBeTruthy();
 
     await app.close();
   });
@@ -90,6 +91,32 @@ function createMockPrisma() {
         upstreamModel: 'cx/gpt-5.3-codex-spark',
         enabled: true,
         description: null,
+        lastSyncedAt: null,
+        createdAt: new Date('2026-06-30T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-30T00:00:00.000Z'),
+        provider: {
+          id: 'provider-1',
+          slug: 'test',
+          name: 'Test',
+          baseUrl: 'https://router.example/v1',
+          authType: 'none' as const,
+          encryptedApiKey: null,
+          apiKeyLast4: null,
+          enabled: true,
+          healthStatus: null,
+          lastHealthAt: null,
+          createdAt: new Date('2026-06-30T00:00:00.000Z'),
+          updatedAt: new Date('2026-06-30T00:00:00.000Z'),
+        },
+      }),
+      update: async () => ({
+        id: 'alias-1',
+        alias: 'code-premium',
+        providerId: 'provider-1',
+        upstreamModel: 'cx/gpt-5.3-codex-spark',
+        enabled: true,
+        description: null,
+        lastSyncedAt: new Date('2026-06-30T00:00:01.000Z'),
         createdAt: new Date('2026-06-30T00:00:00.000Z'),
         updatedAt: new Date('2026-06-30T00:00:00.000Z'),
         provider: {

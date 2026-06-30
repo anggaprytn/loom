@@ -150,11 +150,13 @@ model ModelAlias {
   upstreamModel String
   enabled       Boolean   @default(true)
   description   String?
+  lastSyncedAt  DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   @@index([providerId])
   @@index([enabled])
+  @@index([lastSyncedAt])
 }
 
 model AdminOperation {

@@ -139,6 +139,16 @@ export function App() {
     }
   };
 
+  const updateToken = (value: string) => {
+    setToken(value);
+    const trimmed = value.trim();
+    if (trimmed) {
+      localStorage.setItem(tokenKey, trimmed);
+    } else {
+      localStorage.removeItem(tokenKey);
+    }
+  };
+
   const refresh = async () => {
     if (!token.trim()) {
       notify('Enter the admin token before loading dashboard data.', 'warn');
@@ -287,9 +297,9 @@ export function App() {
               aria-label="Admin token"
               type="password"
               value={token}
-              onChange={(event) => setToken(event.target.value)}
+              onChange={(event) => updateToken(event.target.value)}
               placeholder="ADMIN_TOKEN"
-              autoComplete="off"
+              autoComplete="current-password"
             />
             <Button
               tone="primary"
@@ -562,8 +572,9 @@ function Keys({
   const rows = useRows(data.keys, filters, sort, [
     'name',
     'prefix',
-    'userId',
-    'teamId',
+    (key) => key.user?.email || data.users.find((user) => user.id === key.userId)?.email,
+    (key) => key.user?.name || data.users.find((user) => user.id === key.userId)?.name,
+    (key) => key.team?.name || key.team?.slug,
     'status',
     'litellmKeyAlias',
   ]);
@@ -662,19 +673,20 @@ function Keys({
               <strong>Issue access</strong>
               <span>Select a developer, choose allowed aliases, then issue the key.</span>
             </div>
-            <label className="field full">
+            <div className="field full">
               <span>Developer *</span>
-              <select name="userId" required>
-                <option value="">
-                  {data.users.length ? 'Select developer' : 'Create a developer first'}
-                </option>
-                {data.users.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.email}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <SearchableSelect
+                name="userId"
+                placeholder={data.users.length ? 'Select developer' : 'Create a developer first'}
+                options={data.users.map((user) => ({
+                  value: user.id,
+                  label: user.email,
+                  description: [user.name, user.team?.name || user.team?.slug]
+                    .filter(Boolean)
+                    .join(' • '),
+                }))}
+              />
+            </div>
             <Field label="Key Name" name="name" required defaultValue="codex" />
             <div className="field full">
               <span>Model Access *</span>
@@ -723,8 +735,7 @@ function Keys({
               render: (key: ApiKey) => (
                 <>
                   <strong>{key.name}</strong>
-                  <div className="hint mono">{key.prefix}</div>
-                  {key.litellmKeyAlias && <div className="hint mono">{key.litellmKeyAlias}</div>}
+                  <div className="hint">Developer key</div>
                 </>
               ),
             },
@@ -732,10 +743,10 @@ function Keys({
               key: 'userId',
               label: 'Developer',
               render: (key: ApiKey) => {
-                const user = data.users.find((item) => item.id === key.userId);
+                const user = key.user || data.users.find((item) => item.id === key.userId);
                 return (
                   <>
-                    <strong>{user?.email || key.userId}</strong>
+                    <strong>{user?.email || 'Unknown developer'}</strong>
                     {user?.name && <div className="hint">{user.name}</div>}
                   </>
                 );
@@ -744,7 +755,14 @@ function Keys({
             {
               key: 'teamId',
               label: 'Team',
-              render: (key: ApiKey) => <span className="mono">{key.teamId || 'None'}</span>,
+              render: (key: ApiKey) => (
+                <>
+                  <strong>{key.team?.name || key.team?.slug || 'No team'}</strong>
+                  {key.team?.slug && key.team.name !== key.team.slug && (
+                    <div className="hint">{key.team.slug}</div>
+                  )}
+                </>
+              ),
             },
             {
               key: 'status',
@@ -1106,21 +1124,20 @@ function Aliases({
         >
           <form className="form-grid" onSubmit={createAlias}>
             <Field label="Alias" name="alias" required defaultValue="code-premium" />
-            <label className="field">
+            <div className="field">
               <span>Provider *</span>
-              <select name="providerId" required>
-                <option value="">
-                  {data.providers.length ? 'Select provider' : 'Create a provider first'}
-                </option>
-                {data.providers
+              <SearchableSelect
+                name="providerId"
+                placeholder={data.providers.length ? 'Select provider' : 'Create a provider first'}
+                options={data.providers
                   .filter((provider) => provider.enabled)
-                  .map((provider) => (
-                    <option key={provider.id} value={provider.id}>
-                      {provider.slug}
-                    </option>
-                  ))}
-              </select>
-            </label>
+                  .map((provider) => ({
+                    value: provider.id,
+                    label: provider.slug,
+                    description: provider.name,
+                  }))}
+              />
+            </div>
             <Field
               label="Upstream Model"
               name="upstreamModel"
@@ -1182,9 +1199,9 @@ function Aliases({
                 ),
             },
             {
-              key: 'updatedAt',
+              key: 'lastSyncedAt',
               label: 'Last synced',
-              render: (a: ModelAlias) => <RelativeTime value={a.updatedAt || a.createdAt} />,
+              render: (a: ModelAlias) => <RelativeTime value={a.lastSyncedAt} empty="Never" />,
             },
             {
               key: 'actions',
@@ -1273,7 +1290,25 @@ function Usage({
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [loading, setLoading] = useState(false);
+  const [preset, setPreset] = useState('last7');
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   useEffect(() => setUsage(data.usage), [data.usage]);
+  const topUsersByCost = usage?.topUsersByCost?.length ? usage.topUsersByCost : usage?.byUser || [];
+  const topUsersByTokens = usage?.topUsersByTokens?.length
+    ? usage.topUsersByTokens
+    : [...(usage?.byUser || [])].sort(
+        (a, b) => Number(b.totalTokens || 0) - Number(a.totalTokens || 0),
+      );
+  const selectedUser =
+    (usage?.byUser || []).find((row) => usageUserId(row) === selectedUserId) || null;
+
+  const applyPreset = (value: string) => {
+    setPreset(value);
+    if (value === 'custom') return;
+    const range = usagePresetRange(value);
+    setFrom(range.from);
+    setTo(range.to);
+  };
 
   const refreshUsage = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1315,23 +1350,53 @@ function Usage({
         subtitle={`Source: ${usage?.source || 'LiteLLM spend logs'}`}
       >
         <form className="usage-filters" onSubmit={refreshUsage}>
-          <label className="field">
+          <div className="field">
             <span>Source</span>
-            <select
+            <SearchableSelect
               value={source}
-              onChange={(event) => setSource(event.target.value as 'litellm' | 'local')}
-            >
-              <option value="litellm">LiteLLM spend logs</option>
-              <option value="local">Local ingest records</option>
-            </select>
-          </label>
+              onChange={(value) => setSource(value as 'litellm' | 'local')}
+              options={[
+                { value: 'litellm', label: 'LiteLLM spend logs' },
+                { value: 'local', label: 'Local ingest records' },
+              ]}
+            />
+          </div>
+          <div className="field">
+            <span>Range</span>
+            <SearchableSelect
+              value={preset}
+              onChange={applyPreset}
+              options={[
+                { value: 'today', label: 'Today' },
+                { value: 'yesterday', label: 'Yesterday' },
+                { value: 'last7', label: 'Last 7 days' },
+                { value: 'thisMonth', label: 'This month' },
+                { value: 'lastMonth', label: 'Last month' },
+                { value: 'custom', label: 'Custom range' },
+              ]}
+            />
+          </div>
           <label className="field">
             <span>From</span>
-            <input type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
+            <input
+              type="date"
+              value={from}
+              onChange={(event) => {
+                setPreset('custom');
+                setFrom(event.target.value);
+              }}
+            />
           </label>
           <label className="field">
             <span>To</span>
-            <input type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+            <input
+              type="date"
+              value={to}
+              onChange={(event) => {
+                setPreset('custom');
+                setTo(event.target.value);
+              }}
+            />
           </label>
           <div className="actions">
             <Button
@@ -1345,10 +1410,60 @@ function Usage({
           </div>
         </form>
         {pendingAction?.kind === 'usage-refresh' && <PendingBadge>Refreshing...</PendingBadge>}
+        <UsageStatus usage={usage} source={source} from={from} to={to} />
+        <div className="actions">
+          <Button
+            type="button"
+            tone="utility"
+            icon={<Copy />}
+            onClick={() => exportUsageCsv('usage-by-user.csv', usage?.byUser || [])}
+          >
+            Export users CSV
+          </Button>
+          <Button
+            type="button"
+            tone="utility"
+            icon={<Copy />}
+            onClick={() => exportUsageCsv('usage-by-team.csv', usage?.byTeam || [])}
+          >
+            Export teams CSV
+          </Button>
+          <Button
+            type="button"
+            tone="utility"
+            icon={<Copy />}
+            onClick={() =>
+              exportUsageCsv('usage-daily-rollup.csv', usage?.rawDailyRollup || usage?.byDay || [])
+            }
+          >
+            Export daily CSV
+          </Button>
+        </div>
+        {usage?.unknownAttribution && (
+          <div className="callout warn">
+            <strong>Unknown attribution detected.</strong> {usage.unknownAttribution.requests}{' '}
+            requests could not be mapped to a developer key, user, or team.
+          </div>
+        )}
         <div className="grid two">
-          <UsageTable title="By User" rows={usage?.byUser || []} rowKey="userId" />
+          <UserUsageTable
+            title="Top users by cost"
+            rows={topUsersByCost}
+            onSelect={(row) => setSelectedUserId(usageUserId(row))}
+          />
+          <UserUsageTable
+            title="Top users by tokens"
+            rows={topUsersByTokens}
+            onSelect={(row) => setSelectedUserId(usageUserId(row))}
+          />
+        </div>
+        <div className="grid two">
+          <UsageTable title="By Team" rows={usage?.byTeam || []} rowKey="team" />
           <UsageTable title="By Model" rows={usage?.byModel || []} rowKey="model" />
         </div>
+        {selectedUser && (
+          <UserUsageDetail row={selectedUser} onClose={() => setSelectedUserId(null)} />
+        )}
       </Panel>
     </>
   );
@@ -1490,6 +1605,169 @@ function Modal({
   );
 }
 
+function UsageStatus({
+  usage,
+  source,
+  from,
+  to,
+}: {
+  usage: UsageResponse | null;
+  source: 'litellm' | 'local';
+  from: string;
+  to: string;
+}) {
+  if (!usage) {
+    return (
+      <div className="callout warn">
+        <strong>Usage is not loaded.</strong> Refresh usage to check spend logs and attribution.
+      </div>
+    );
+  }
+  if (!usage.totals.requests) {
+    return (
+      <div className="callout info">
+        <strong>No usage in selected range.</strong> Source is{' '}
+        {source === 'litellm' ? 'LiteLLM spend logs' : 'local ingest records'}.
+        {from || to ? ' Adjust the date range if this looks unexpected.' : ''}
+      </div>
+    );
+  }
+  return (
+    <div className="callout info">
+      <strong>Usage loaded.</strong> Showing {usage.totals.requests} requests from{' '}
+      {source === 'litellm' ? 'LiteLLM spend logs' : 'local ingest records'}.
+    </div>
+  );
+}
+
+function UserUsageTable({
+  title,
+  rows,
+  onSelect,
+}: {
+  title: string;
+  rows: UsageGroup[];
+  onSelect: (row: UsageGroup) => void;
+}) {
+  const [sort, setSort] = useState<SortState>({ key: 'estimatedCost', dir: 'desc' });
+  const sorted = useMemo(() => sortRows(rows, sort), [rows, sort]);
+  return (
+    <div>
+      <h3>{title}</h3>
+      <DataTable
+        empty="No attributed usage in this range."
+        rows={sorted}
+        sort={sort}
+        setSort={setSort}
+        columns={[
+          {
+            key: 'user',
+            label: 'User',
+            render: (row: UsageGroup) => (
+              <button className="link-button" type="button" onClick={() => onSelect(row)}>
+                <span className="strong">{usageUserLabel(row)}</span>
+                <span className="hint block">{row.team?.name || row.team?.slug || 'No team'}</span>
+              </button>
+            ),
+          },
+          { key: 'requests', label: 'Requests' },
+          { key: 'totalTokens', label: 'Tokens' },
+          {
+            key: 'estimatedCost',
+            label: 'Cost',
+            render: (row: UsageGroup) => formatMoney(row.estimatedCost),
+          },
+          {
+            key: 'lastUsage',
+            label: 'Last activity',
+            render: (row: UsageGroup) => <RelativeTime value={row.lastUsage} empty="Never" />,
+          },
+        ]}
+      />
+    </div>
+  );
+}
+
+function UserUsageDetail({ row, onClose }: { row: UsageGroup; onClose: () => void }) {
+  const costLimit = Number(row.budget?.monthlyCostLimit || 0);
+  const tokenLimit = Number(row.budget?.monthlyTokenLimit || 0);
+  const costPercent = costLimit
+    ? Math.round((Number(row.estimatedCost || 0) / costLimit) * 100)
+    : 0;
+  const tokenPercent = tokenLimit
+    ? Math.round((Number(row.totalTokens || 0) / tokenLimit) * 100)
+    : 0;
+  return (
+    <Panel
+      className="stack"
+      title={`Usage detail: ${usageUserLabel(row)}`}
+      subtitle="Requests, cost, models, keys, activity, and budget risk for the selected range."
+    >
+      <div className="actions">
+        <Button type="button" tone="utility" onClick={onClose}>
+          Close
+        </Button>
+      </div>
+      <div className="grid four">
+        <Metric label="Requests" value={row.requests || 0} />
+        <Metric label="Total tokens" value={row.totalTokens || 0} />
+        <Metric label="Estimated cost" value={formatMoney(row.estimatedCost)} />
+        <Metric
+          label="Errors"
+          value={row.errors || 0}
+          badge={row.errors ? <Badge tone="warn">Review</Badge> : <Badge tone="ok">Clear</Badge>}
+        />
+      </div>
+      <div className="grid two">
+        <Panel title="Budget status" subtitle="Warning starts at 80%; hard stop target is 100%.">
+          {row.budget ? (
+            <div className="stack small">
+              <div className="row spread">
+                <span>Cost budget</span>
+                <Badge tone={costPercent >= 100 ? 'danger' : costPercent >= 80 ? 'warn' : 'ok'}>
+                  {costPercent || 0}%
+                </Badge>
+              </div>
+              <div className="hint">
+                {formatMoney(row.estimatedCost)} of {formatMoney(row.budget.monthlyCostLimit || 0)}
+              </div>
+              <div className="row spread">
+                <span>Token budget</span>
+                <Badge tone={tokenPercent >= 100 ? 'danger' : tokenPercent >= 80 ? 'warn' : 'ok'}>
+                  {tokenPercent || 0}%
+                </Badge>
+              </div>
+              <div className="hint">
+                {row.totalTokens || 0} of {row.budget.monthlyTokenLimit || 0} tokens
+              </div>
+            </div>
+          ) : (
+            <div className="empty">
+              No active user budget. Set a budget to make this operational.
+            </div>
+          )}
+        </Panel>
+        <Panel title="Anomalies" subtitle="Simple rule-based signals for operational review.">
+          {row.anomalies?.length ? (
+            <ul className="compact-list">
+              {row.anomalies.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          ) : (
+            <div className="empty">No anomaly detected in this range.</div>
+          )}
+        </Panel>
+      </div>
+      <div className="grid two">
+        <UsageTable title="Cost by model" rows={row.modelBreakdown || []} rowKey="name" />
+        <UsageTable title="Cost by developer key" rows={row.keyBreakdown || []} rowKey="name" />
+      </div>
+      <UsageTable title="Daily trend" rows={row.daily || []} rowKey="date" />
+    </Panel>
+  );
+}
+
 function UsageTable({
   title,
   rows,
@@ -1514,17 +1792,106 @@ function UsageTable({
             key: rowKey,
             label: rowKey,
             className: 'mono',
-            render: (row: UsageGroup) => String(row[rowKey] || '-'),
+            render: (row: UsageGroup) => usageGroupLabel(row, rowKey),
           },
           { key: 'requests', label: 'Requests' },
           { key: 'totalTokens', label: 'Tokens' },
           {
             key: 'estimatedCost',
             label: 'Cost',
-            render: (row: UsageGroup) => `$${Number(row.estimatedCost || 0).toFixed(4)}`,
+            render: (row: UsageGroup) => formatMoney(row.estimatedCost),
           },
         ]}
       />
+    </div>
+  );
+}
+
+function SearchableSelect({
+  name,
+  value,
+  defaultValue = '',
+  onChange,
+  options,
+  placeholder = 'Select option',
+  className = '',
+}: {
+  name?: string;
+  value?: string;
+  defaultValue?: string;
+  onChange?: (value: string) => void;
+  options: Array<{ value: string; label: string; description?: string }>;
+  placeholder?: string;
+  className?: string;
+}) {
+  const [internalValue, setInternalValue] = useState(defaultValue);
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const selectedValue = value ?? internalValue;
+  const selected = options.find((option) => option.value === selectedValue);
+  const filtered = options.filter((option) =>
+    `${option.label} ${option.description || ''} ${option.value}`
+      .toLowerCase()
+      .includes(query.toLowerCase()),
+  );
+
+  const choose = (nextValue: string) => {
+    if (value === undefined) setInternalValue(nextValue);
+    onChange?.(nextValue);
+    setQuery('');
+    setOpen(false);
+  };
+
+  return (
+    <div
+      className={`searchable-select ${className}`}
+      onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+    >
+      {name && <input type="hidden" name={name} value={selectedValue} />}
+      <button
+        type="button"
+        className="searchable-select-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((state) => !state)}
+      >
+        <span>
+          {selected?.label || placeholder}
+          {selected?.description && <small>{selected.description}</small>}
+        </span>
+      </button>
+      {open && (
+        <div className="searchable-select-popover">
+          <label className="search compact">
+            <Search />
+            <input
+              autoFocus
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search..."
+            />
+          </label>
+          <div className="searchable-select-list" role="listbox">
+            {filtered.length ? (
+              filtered.map((option) => (
+                <button
+                  type="button"
+                  key={option.value}
+                  role="option"
+                  aria-selected={option.value === selectedValue}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => choose(option.value)}
+                >
+                  <span>{option.label}</span>
+                  {option.description && <small>{option.description}</small>}
+                </button>
+              ))
+            ) : (
+              <div className="empty compact">No options match.</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1610,17 +1977,19 @@ function DataTable<T extends Record<string, unknown>>({
           Showing {(safePage - 1) * pageSize + 1}-{Math.min(safePage * pageSize, rows.length)} of{' '}
           {rows.length}
         </span>
-        <select
-          value={pageSize}
-          onChange={(event) => {
-            setPageSize(Number(event.target.value));
+        <SearchableSelect
+          className="page-size-select"
+          value={String(pageSize)}
+          onChange={(value) => {
+            setPageSize(Number(value));
             setPage(1);
           }}
-        >
-          <option value={10}>10 rows</option>
-          <option value={25}>25 rows</option>
-          <option value={50}>50 rows</option>
-        </select>
+          options={[
+            { value: '10', label: '10 rows' },
+            { value: '25', label: '25 rows' },
+            { value: '50', label: '50 rows' },
+          ]}
+        />
         <Button onClick={() => setPage(Math.max(1, safePage - 1))} disabled={safePage === 1}>
           Previous
         </Button>
@@ -1664,17 +2033,14 @@ function TableToolbar({
             placeholder={`Search ${title.toLowerCase()}`}
           />
         </label>
-        <select
+        <SearchableSelect
           value={filters.status}
-          onChange={(event) => setFilters({ ...filters, status: event.target.value })}
-        >
-          <option value="all">All statuses</option>
-          {options.map((option) => (
-            <option key={option} value={option}>
-              {titleCase(option)}
-            </option>
-          ))}
-        </select>
+          onChange={(value) => setFilters({ ...filters, status: value })}
+          options={[
+            { value: 'all', label: 'All statuses' },
+            ...options.map((option) => ({ value: option, label: titleCase(option) })),
+          ]}
+        />
       </div>
     </div>
   );
@@ -1866,6 +2232,88 @@ function RelativeTime({
       <span className="hint block">{formatDate(date)}</span>
     </span>
   );
+}
+
+function usageUserId(row: UsageGroup) {
+  return row.user?.id || (typeof row.userId === 'string' ? row.userId : 'unknown');
+}
+
+function usageUserLabel(row: UsageGroup) {
+  if (row.user) return `${row.user.name} <${row.user.email}>`;
+  if (row.userId && row.userId !== 'unknown') return String(row.userId);
+  return 'Unknown attribution';
+}
+
+function usageGroupLabel(row: UsageGroup, key: string) {
+  if (key === 'team') return row.team?.name || row.team?.slug || 'Unknown team';
+  if (key === 'name') return String(row.name || 'Unknown');
+  return String(row[key] || 'Unknown');
+}
+
+function formatMoney(value: unknown) {
+  return `$${Number(value || 0).toFixed(4)}`;
+}
+
+function usagePresetRange(value: string) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const iso = (date: Date) => date.toISOString().slice(0, 10);
+  if (value === 'today') return { from: iso(today), to: iso(addDays(today, 1)) };
+  if (value === 'yesterday') return { from: iso(addDays(today, -1)), to: iso(today) };
+  if (value === 'thisMonth') {
+    return {
+      from: iso(new Date(now.getFullYear(), now.getMonth(), 1)),
+      to: iso(addDays(today, 1)),
+    };
+  }
+  if (value === 'lastMonth') {
+    return {
+      from: iso(new Date(now.getFullYear(), now.getMonth() - 1, 1)),
+      to: iso(new Date(now.getFullYear(), now.getMonth(), 1)),
+    };
+  }
+  return { from: iso(addDays(today, -6)), to: iso(addDays(today, 1)) };
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function exportUsageCsv(filename: string, rows: UsageGroup[]) {
+  const headers = ['name', 'requests', 'totalTokens', 'estimatedCost', 'errors', 'lastUsage'];
+  const csv = [
+    headers.join(','),
+    ...rows.map((row) =>
+      headers
+        .map((header) => csvCell(header === 'name' ? usageExportName(row) : row[header]))
+        .join(','),
+    ),
+  ].join('\n');
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function usageExportName(row: UsageGroup) {
+  return (
+    row.user?.email ||
+    row.team?.name ||
+    row.key?.name ||
+    row.name ||
+    row.model ||
+    row.date ||
+    'Unknown'
+  );
+}
+
+function csvCell(value: unknown) {
+  const text = String(value ?? '');
+  return `"${text.replace(/"/g, '""')}"`;
 }
 
 function OneTimeSecretPanel({
