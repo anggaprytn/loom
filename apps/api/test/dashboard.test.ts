@@ -31,13 +31,17 @@ const env: Env = {
 };
 
 describe('dashboard route', () => {
-  it('serves the dashboard shell while admin APIs remain protected', async () => {
+  it('reports a missing dashboard build while admin APIs remain protected', async () => {
     const app = await buildApp(env, {} as PrismaLike, new MockLiteLlmAdminClient());
 
     const dashboard = await app.inject({ method: 'GET', url: '/dashboard' });
-    expect(dashboard.statusCode).toBe(200);
-    expect(dashboard.headers['content-type']).toContain('text/html');
-    expect(dashboard.body).toContain('team-llm-gateway');
+    expect(dashboard.statusCode).toBe(503);
+    expect(dashboard.json()).toEqual({
+      error: {
+        code: 'DASHBOARD_BUILD_NOT_FOUND',
+        message: 'Dashboard build was not found. Run the web build before serving /dashboard.',
+      },
+    });
 
     const admin = await app.inject({ method: 'GET', url: '/admin/users' });
     expect(admin.statusCode).toBe(401);

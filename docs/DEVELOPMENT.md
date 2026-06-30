@@ -102,7 +102,7 @@ The real-provider script creates a temporary provider, alias, user, LiteLLM virt
 ## Implementation Notes
 
 - Admin routes live in `apps/api/src/routes/admin.ts`.
-- Dashboard fallback HTML is in `apps/api/src/routes/dashboard.ts`.
+- Dashboard static serving is in `apps/api/src/routes/dashboard.ts`.
 - React dashboard source is in `apps/web/src`.
 - Provider alias rendering and health checks live in `apps/api/src/services/providerRegistry.ts`.
 - LiteLLM admin integration lives in `apps/api/src/services/litellmAdminClient.ts`.

@@ -8,6 +8,8 @@ import {
   Loader2,
   LogOut,
   MoreHorizontal,
+  Monitor,
+  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
@@ -15,9 +17,18 @@ import {
   Search,
   Server,
   Settings,
+  Sun,
   UserPlus,
 } from 'lucide-react';
-import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  FormEvent,
+  ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   api,
   ApiKey,
@@ -40,6 +51,8 @@ type LoadStatus = 'idle' | 'loading' | 'current' | 'stale' | 'failed';
 type SectionState = { status: LoadStatus; lastLoadedAt: Date | null; error?: string };
 type SectionStates = Record<SectionKey, SectionState>;
 type UsageTab = 'users' | 'teams' | 'models' | 'attribution';
+type ThemeMode = 'system' | 'light' | 'dark';
+type ResolvedTheme = 'light' | 'dark';
 type PendingAction =
   | { kind: 'provider-health'; id: string }
   | { kind: 'provider-rotate'; id: string }
@@ -66,6 +79,7 @@ type ModalState =
 const emptyData: DashboardData = { users: [], providers: [], aliases: [], keys: [], usage: null };
 const tokenKey = 'tlg_admin_token';
 const sidebarCollapsedKey = 'tlg_sidebar_collapsed';
+const themeKey = 'tlg_theme';
 const sectionKeys: SectionKey[] = ['users', 'providers', 'aliases', 'keys', 'usage'];
 const emptySectionStates = Object.fromEntries(
   sectionKeys.map((section) => [section, { status: 'idle', lastLoadedAt: null }]),
@@ -116,6 +130,8 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem(sidebarCollapsedKey) === 'true',
   );
+  const [themeMode, setThemeMode] = useState<ThemeMode>(readThemeMode);
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(getSystemTheme);
   const [data, setData] = useState<DashboardData>(emptyData);
   const [errors, setErrors] = useState<Partial<Record<SectionKey, string>>>({});
   const [sectionStates, setSectionStates] = useState<SectionStates>(emptySectionStates);
@@ -129,6 +145,24 @@ export function App() {
   const current = nav.find((item) => item.id === tab)!;
   const hasLoaded = Boolean(lastRefresh);
   const hasFailures = Object.keys(errors).length > 0;
+
+  useLayoutEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const applyTheme = () => {
+      const next = themeMode === 'system' ? getSystemTheme() : themeMode;
+      setResolvedTheme(next);
+      document.documentElement.dataset.theme = next;
+      document.documentElement.dataset.themeMode = themeMode;
+      document.documentElement.style.colorScheme = next;
+      localStorage.setItem(themeKey, themeMode);
+    };
+
+    applyTheme();
+    if (themeMode !== 'system') return;
+
+    media.addEventListener('change', applyTheme);
+    return () => media.removeEventListener('change', applyTheme);
+  }, [themeMode]);
 
   const addActivity = (label: string, tone: Tone = 'info') => {
     setActivity((items) =>
@@ -325,6 +359,7 @@ export function App() {
             <p>{current.description}</p>
           </div>
           <div className="session">
+            <ThemeControl mode={themeMode} resolvedTheme={resolvedTheme} setMode={setThemeMode} />
             <DashboardStatusBadge
               token={token}
               loading={loading}
@@ -2277,6 +2312,48 @@ function RecordDetails({ rows }: { rows: Array<[string, unknown]> }) {
           <span>{label}</span>
           <code>{formatDetailValue(value)}</code>
         </div>
+      ))}
+    </div>
+  );
+}
+
+function readThemeMode(): ThemeMode {
+  const stored = localStorage.getItem(themeKey);
+  return stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
+}
+
+function getSystemTheme(): ResolvedTheme {
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function ThemeControl({
+  mode,
+  resolvedTheme,
+  setMode,
+}: {
+  mode: ThemeMode;
+  resolvedTheme: ResolvedTheme;
+  setMode: (mode: ThemeMode) => void;
+}) {
+  const options: Array<{ id: ThemeMode; label: string; icon: ReactNode }> = [
+    { id: 'system', label: `System (${resolvedTheme})`, icon: <Monitor /> },
+    { id: 'light', label: 'Light', icon: <Sun /> },
+    { id: 'dark', label: 'Dark', icon: <Moon /> },
+  ];
+
+  return (
+    <div className="theme-control" role="group" aria-label="Theme">
+      {options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          aria-pressed={mode === option.id}
+          onClick={() => setMode(option.id)}
+          title={option.label}
+        >
+          {option.icon}
+          <span>{option.id}</span>
+        </button>
       ))}
     </div>
   );

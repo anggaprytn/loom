@@ -20,7 +20,7 @@ Loom does not scrape credentials, pool browser sessions, automate password shari
 ## Current Features
 
 - Fastify control-plane API with bearer-token admin auth.
-- React admin console served from `/dashboard`, with a minimal server-rendered fallback.
+- React admin console served from `/dashboard`.
 - User and team records stored in Postgres through Prisma.
 - LiteLLM virtual key creation and revocation with local hashed key metadata.
 - Provider registry for OpenAI-compatible upstreams.
