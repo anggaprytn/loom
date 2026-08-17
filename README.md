@@ -1,4 +1,4 @@
-![Loom Cover]([https://blobshot-assets.apps.anggaprytn.com/api/files/pbc_1321337024/cagcoccc6vut3te/loom_o1aziz7kmh.webp](https://blobshot-assets.apps.anggaprytn.com/api/files/pbc_1321337024/dm3bq0z3ev1kf0p/loom_4hbc10wjbt.webp))
+![Loom Cover](https://blobshot-assets.apps.anggaprytn.com/api/files/pbc_1321337024/eayfankvwpi9jjq/loom_2_unurjj8r7f.webp)
 
 # Loom
 
